@@ -17,11 +17,11 @@ import { TotalSection } from './components/TotalSection';
 import { NotificationSuccess } from './components/NotificationSuccess';
 import { useTimeManager } from './hooks/useTimeManager';
 import {
-  loadEntries,
-  saveEntries,
-  loadTheme,
-  saveTheme,
+  fetchEntries,
+  addEntry,
+  deleteEntry,
   clearEntries,
+  saveTotals,
 } from './services/storageService';
 import { calculateTotals, getHourlyRate } from './services/calculationService';
 import { exportToPDF } from './services/pdfService';
@@ -58,13 +58,15 @@ export default function ControlHoras() {
    * Inicialización al montar el componente
    */
   useEffect(() => {
-    setEntries(loadEntries());
-    setDarkMode(loadTheme());
+    const loadData = async () => {
+      const data = await fetchEntries();
+      setEntries(data);
+    };
+    loadData();
   }, []);
 
   /**
-   * Actualiza la fecha automáticamente cuando cambia el día
-   * Respeta la fecha manual si el usuario la modificó
+   * Mantiene la fecha siempre en "hoy" y la actualiza al cambiar el día
    */
   useEffect(() => {
     const getToday = () => new Date().toISOString().split('T')[0];
@@ -95,12 +97,19 @@ export default function ControlHoras() {
     };
   }, [isTimerRunning]);
 
+  // ========================================================================
+  // CÁLCULOS
+  // ========================================================================
+
+  const { totalCost, totalHours } = calculateTotals(entries);
+  const hourlyRate = getHourlyRate();
+
   /**
-   * Persistencia del tema
+   * Persistencia de totales en Firestore
    */
   useEffect(() => {
-    saveTheme(darkMode);
-  }, [darkMode]);
+    saveTotals({ totalCost, totalHours });
+  }, [totalCost, totalHours]);
 
   // ========================================================================
   // FUNCIONES
@@ -109,7 +118,7 @@ export default function ControlHoras() {
   /**
    * Agrega una nueva entrada de horas
    */
-  const handleAddEntry = () => {
+  const handleAddEntry = async () => {
     const newEntry = timeManager.createEntry({
       tripType,
       customTrip,
@@ -124,7 +133,7 @@ export default function ControlHoras() {
 
     const newEntries = [newEntry, ...entries];
     setEntries(newEntries);
-    saveEntries(newEntries);
+    await addEntry(newEntry);
 
     // Mostrar notificación
     setShowSuccess(true);
@@ -137,10 +146,10 @@ export default function ControlHoras() {
   /**
    * Elimina una entrada por ID
    */
-  const handleDeleteEntry = (id) => {
+  const handleDeleteEntry = async (id) => {
     const newEntries = entries.filter((e) => e.id !== id);
     setEntries(newEntries);
-    saveEntries(newEntries);
+    await deleteEntry(id);
   };
 
   /**
@@ -160,10 +169,10 @@ export default function ControlHoras() {
   /**
    * Resetea todas las entradas del mes
    */
-  const handleResetMonth = () => {
+  const handleResetMonth = async () => {
     if (confirm('¿Estás seguro de que quieres resetear el mes?')) {
       setEntries([]);
-      clearEntries();
+      await clearEntries();
     }
   };
 
@@ -173,13 +182,6 @@ export default function ControlHoras() {
   const handleExportPDF = () => {
     exportToPDF(entries);
   };
-
-  // ========================================================================
-  // CÁLCULOS
-  // ========================================================================
-
-  const { totalCost, totalHours } = calculateTotals(entries);
-  const hourlyRate = getHourlyRate();
 
   // ========================================================================
   // RENDERIZADO

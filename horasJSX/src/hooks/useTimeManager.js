@@ -74,8 +74,10 @@ export const useTimeManager = () => {
     }
 
     // Crear entrada
+    const now = Date.now();
     const newEntry = {
-      id: Date.now(),
+      id: now,
+      createdAt: now,
       tripType: tripValue,
       date: formatDateDisplay(date),
       hours: totalHours,

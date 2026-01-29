@@ -1,72 +1,115 @@
 /**
- * Servicio de persistencia con localStorage
- * Maneja lectura y escritura de datos en el navegador
+ * Servicio de persistencia con Firebase Firestore
+ * Maneja lectura y escritura de datos en la nube
  */
 
-const ENTRIES_KEY = 'billing-entries';
-const THEME_KEY = 'theme';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  setDoc,
+  writeBatch,
+} from 'firebase/firestore';
+import { db } from './firebase';
+
+const ENTRIES_COLLECTION = 'entries';
+const TOTALS_DOC = 'totals/global';
 
 /**
- * Carga las entradas guardadas desde localStorage
- * @returns {Array} Array de entradas o [] si no hay datos
+ * Carga entradas desde Firestore, ordenadas por más recientes
+ * @returns {Promise<Array>} Array de entradas
  */
-export const loadEntries = () => {
+export const fetchEntries = async () => {
   try {
-    const saved = localStorage.getItem(ENTRIES_KEY);
-    return saved ? JSON.parse(saved) : [];
+    const q = query(
+      collection(db, ENTRIES_COLLECTION),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      return {
+        id: data.id ?? docSnap.id,
+        ...data,
+      };
+    });
   } catch (error) {
-    console.log('No hay entradas previas');
+    console.error('Error al cargar entradas:', error);
     return [];
   }
 };
 
 /**
- * Guarda las entradas en localStorage
- * @param {Array} entries - Array de entradas a guardar
- * @throws {Error} Si hay error al guardar
+ * Guarda una entrada en Firestore
+ * @param {object} entry - Entrada a guardar
  */
-export const saveEntries = (entries) => {
+export const addEntry = async (entry) => {
   try {
-    localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries));
+    const entryRef = doc(db, ENTRIES_COLLECTION, String(entry.id));
+    await setDoc(entryRef, entry);
   } catch (error) {
-    console.error('Error al guardar entradas:', error);
+    console.error('Error al guardar entrada:', error);
     throw error;
   }
 };
 
 /**
- * Carga la preferencia de tema guardada
- * @returns {string} 'dark' o 'light'
+ * Elimina una entrada por ID
+ * @param {string|number} id - ID de la entrada
  */
-export const loadTheme = () => {
+export const deleteEntry = async (id) => {
   try {
-    const saved = localStorage.getItem(THEME_KEY);
-    return saved ? saved === 'dark' : true; // true = dark mode por defecto
+    await deleteDoc(doc(db, ENTRIES_COLLECTION, String(id)));
   } catch (error) {
-    console.log('No hay preferencia de tema guardada');
-    return true;
+    console.error('Error al eliminar entrada:', error);
+    throw error;
   }
 };
 
 /**
- * Guarda la preferencia de tema
- * @param {boolean} isDarkMode - true para modo oscuro, false para claro
+ * Limpia todas las entradas en Firestore
  */
-export const saveTheme = (isDarkMode) => {
+export const clearEntries = async () => {
   try {
-    localStorage.setItem(THEME_KEY, isDarkMode ? 'dark' : 'light');
-  } catch (error) {
-    console.error('Error al guardar tema:', error);
-  }
-};
-
-/**
- * Limpia todas las entradas del almacenamiento
- */
-export const clearEntries = () => {
-  try {
-    localStorage.removeItem(ENTRIES_KEY);
+    const snapshot = await getDocs(collection(db, ENTRIES_COLLECTION));
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+    await batch.commit();
   } catch (error) {
     console.error('Error al limpiar entradas:', error);
+    throw error;
+  }
+};
+
+/**
+ * Guarda totales en Firestore
+ * @param {object} totals - Totales a guardar
+ */
+export const saveTotals = async (totals) => {
+  try {
+    await setDoc(doc(db, TOTALS_DOC), {
+      ...totals,
+      updatedAt: Date.now(),
+    }, { merge: true });
+  } catch (error) {
+    console.error('Error al guardar totales:', error);
+  }
+};
+
+/**
+ * Carga los totales guardados en Firestore
+ * @returns {Promise<object|null>} Totales o null
+ */
+export const fetchTotals = async () => {
+  try {
+    const snap = await getDoc(doc(db, TOTALS_DOC));
+    return snap.exists() ? snap.data() : null;
+  } catch (error) {
+    console.error('Error al cargar totales:', error);
+    return null;
   }
 };
