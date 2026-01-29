@@ -3,11 +3,18 @@
  * Muestra el listado de todas las entradas registradas
  */
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { FileText, Clock, Trash2 } from 'lucide-react';
 import { formatDisplayTime, formatCurrency } from '../utils/formatters';
 
 export function EntriesList({ entries, onDeleteEntry, darkMode }) {
+  const firstEntryRef = useRef(null);
+
+  useEffect(() => {
+    if (entries.length === 0) return;
+    firstEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [entries.length]);
+
   return (
     <div className="mb-8">
       <h2
@@ -44,6 +51,7 @@ export function EntriesList({ entries, onDeleteEntry, darkMode }) {
           entries.map((entry, index) => (
             <div
               key={entry.id}
+              ref={index === 0 ? firstEntryRef : null}
               className={`rounded-xl p-6 shadow-lg border transition-all duration-300 hover:shadow-xl animate-slideIn ${
                 darkMode
                   ? 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600'

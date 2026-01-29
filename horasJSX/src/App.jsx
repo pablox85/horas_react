@@ -9,7 +9,7 @@
  * @version 2.0 (Modularizado)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { InputSection } from './components/InputSection';
 import { EntriesList } from './components/EntriesList';
@@ -42,6 +42,7 @@ export default function ControlHoras() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
+  const lastAutoDateRef = useRef('');
 
   // ========================================================================
   // HOOKS PERSONALIZADOS
@@ -57,9 +58,26 @@ export default function ControlHoras() {
    * Inicialización al montar el componente
    */
   useEffect(() => {
-    setDate(new Date().toISOString().split('T')[0]);
     setEntries(loadEntries());
     setDarkMode(loadTheme());
+  }, []);
+
+  /**
+   * Actualiza la fecha automáticamente cuando cambia el día
+   * Respeta la fecha manual si el usuario la modificó
+   */
+  useEffect(() => {
+    const getToday = () => new Date().toISOString().split('T')[0];
+
+    const updateDate = () => {
+      const today = getToday();
+      lastAutoDateRef.current = today;
+      setDate(today);
+    };
+
+    updateDate();
+    const intervalId = setInterval(updateDate, 60 * 1000);
+    return () => clearInterval(intervalId);
   }, []);
 
   /**
@@ -104,7 +122,7 @@ export default function ControlHoras() {
 
     if (!newEntry) return;
 
-    const newEntries = [...entries, newEntry];
+    const newEntries = [newEntry, ...entries];
     setEntries(newEntries);
     saveEntries(newEntries);
 
@@ -198,7 +216,7 @@ export default function ControlHoras() {
           isTimerRunning={isTimerRunning}
           onTripTypeChange={setTripType}
           onCustomTripChange={setCustomTrip}
-          onDateChange={setDate}
+          onDateChange={() => setDate(lastAutoDateRef.current)}
           onModeChange={setMode}
           onHoursChange={setHours}
           onMinutesChange={setMinutes}
