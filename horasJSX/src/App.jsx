@@ -83,19 +83,32 @@ export default function ControlHoras() {
   }, []);
 
   /**
-   * Manejo del timer
+   * Manejo del timer con timestamps para continuar en segundo plano
    */
+  const timerStartTimeRef = useRef(null);
+  
   useEffect(() => {
     let timerInterval;
     if (isTimerRunning) {
+      // Guardar el timestamp de inicio si no existe
+      if (!timerStartTimeRef.current) {
+        timerStartTimeRef.current = Date.now() - (timerSeconds * 1000);
+      }
+      
       timerInterval = setInterval(() => {
-        setTimerSeconds((prev) => prev + 1);
-      }, 1000);
+        const elapsedMs = Date.now() - timerStartTimeRef.current;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+        setTimerSeconds(elapsedSeconds);
+      }, 100); // Actualizar más frecuentemente para precisión
+    } else {
+      // Limpiar el timestamp cuando se detiene
+      timerStartTimeRef.current = null;
     }
+    
     return () => {
       if (timerInterval) clearInterval(timerInterval);
     };
-  }, [isTimerRunning]);
+  }, [isTimerRunning, timerSeconds]);
 
   // ========================================================================
   // CÁLCULOS
