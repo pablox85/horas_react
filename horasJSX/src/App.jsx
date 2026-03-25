@@ -2,11 +2,11 @@
  * ============================================================================
  * CONTROL DE HORAS - APLICACIÓN DE FACTURACIÓN (Componente Principal)
  * ============================================================================
- * 
+ *
  * Aplicación React para llevar control de horas trabajadas y calcular costos
  * de facturación. Incluye modo manual, timer, y modo oscuro/claro.
- * 
- * @version 2.0 (Modularizado)
+ *
+ * @version 2.1
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -26,11 +26,12 @@ import {
 import { calculateTotals, getHourlyRate } from './services/calculationService';
 import { exportToPDF } from './services/pdfService';
 
+const TIMER_STORAGE_KEY = 'horas_react_timer';
+
 export default function ControlHoras() {
   // ========================================================================
   // ESTADOS
   // ========================================================================
-
   const [entries, setEntries] = useState([]);
   const [tripType, setTripType] = useState('Rendición');
   const [customTrip, setCustomTrip] = useState('');
@@ -42,12 +43,13 @@ export default function ControlHoras() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
+
   const lastAutoDateRef = useRef('');
+  const timerStartTimeRef = useRef(null);
 
   // ========================================================================
   // HOOKS PERSONALIZADOS
   // ========================================================================
-
   const timeManager = useTimeManager();
 
   // ========================================================================
@@ -62,6 +64,7 @@ export default function ControlHoras() {
       const data = await fetchEntries();
       setEntries(data);
     };
+
     loadData();
   }, []);
 
@@ -78,42 +81,114 @@ export default function ControlHoras() {
     };
 
     updateDate();
+
     const intervalId = setInterval(updateDate, 60 * 1000);
     return () => clearInterval(intervalId);
   }, []);
 
   /**
-   * Manejo del timer con timestamps para continuar en segundo plano
+   * Restaura timer persistido al recargar o volver desde móvil bloqueado
    */
-  const timerStartTimeRef = useRef(null);
-  
+  useEffect(() => {
+    const savedTimer = localStorage.getItem(TIMER_STORAGE_KEY);
+    if (!savedTimer) return;
+
+    try {
+      const parsed = JSON.parse(savedTimer);
+
+      if (parsed?.isRunning && parsed?.startTime) {
+        timerStartTimeRef.current = parsed.startTime;
+        const elapsedSeconds = Math.floor(
+          (Date.now() - parsed.startTime) / 1000
+        );
+
+        setTimerSeconds(elapsedSeconds > 0 ? elapsedSeconds : 0);
+        setIsTimerRunning(true);
+      }
+    } catch (error) {
+      console.error('Error restaurando timer:', error);
+      localStorage.removeItem(TIMER_STORAGE_KEY);
+    }
+  }, []);
+
+  /**
+   * Manejo del timer con persistencia en localStorage
+   */
   useEffect(() => {
     let timerInterval;
+
     if (isTimerRunning) {
-      // Guardar el timestamp de inicio si no existe
       if (!timerStartTimeRef.current) {
-        timerStartTimeRef.current = Date.now() - (timerSeconds * 1000);
+        timerStartTimeRef.current = Date.now() - timerSeconds * 1000;
       }
-      
+
+      localStorage.setItem(
+        TIMER_STORAGE_KEY,
+        JSON.stringify({
+          isRunning: true,
+          startTime: timerStartTimeRef.current,
+        })
+      );
+
       timerInterval = setInterval(() => {
+        if (!timerStartTimeRef.current) return;
+
         const elapsedMs = Date.now() - timerStartTimeRef.current;
         const elapsedSeconds = Math.floor(elapsedMs / 1000);
         setTimerSeconds(elapsedSeconds);
-      }, 100); // Actualizar más frecuentemente para precisión
+      }, 1000);
     } else {
-      // Limpiar el timestamp cuando se detiene
       timerStartTimeRef.current = null;
+      localStorage.removeItem(TIMER_STORAGE_KEY);
     }
-    
+
     return () => {
       if (timerInterval) clearInterval(timerInterval);
     };
-  }, [isTimerRunning, timerSeconds]);
+  }, [isTimerRunning]);
+
+  /**
+   * Recalcula al volver a foco o desbloquear pantalla
+   */
+  useEffect(() => {
+    const syncTimerWithNow = () => {
+      const savedTimer = localStorage.getItem(TIMER_STORAGE_KEY);
+      if (!savedTimer) return;
+
+      try {
+        const parsed = JSON.parse(savedTimer);
+
+        if (parsed?.isRunning && parsed?.startTime) {
+          timerStartTimeRef.current = parsed.startTime;
+          const elapsedSeconds = Math.floor(
+            (Date.now() - parsed.startTime) / 1000
+          );
+          setTimerSeconds(elapsedSeconds > 0 ? elapsedSeconds : 0);
+          setIsTimerRunning(true);
+        }
+      } catch (error) {
+        console.error('Error sincronizando timer:', error);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncTimerWithNow();
+      }
+    };
+
+    window.addEventListener('focus', syncTimerWithNow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', syncTimerWithNow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // ========================================================================
   // CÁLCULOS
   // ========================================================================
-
   const { totalCost, totalHours } = calculateTotals(entries);
   const hourlyRate = getHourlyRate();
 
@@ -127,6 +202,25 @@ export default function ControlHoras() {
   // ========================================================================
   // FUNCIONES
   // ========================================================================
+
+  const handleStartTimer = () => {
+    const startTime = Date.now() - timerSeconds * 1000;
+    timerStartTimeRef.current = startTime;
+
+    localStorage.setItem(
+      TIMER_STORAGE_KEY,
+      JSON.stringify({
+        isRunning: true,
+        startTime,
+      })
+    );
+
+    setIsTimerRunning(true);
+  };
+
+  const handleStopTimer = () => {
+    setIsTimerRunning(false);
+  };
 
   /**
    * Agrega una nueva entrada de horas
@@ -146,13 +240,12 @@ export default function ControlHoras() {
 
     const newEntries = [newEntry, ...entries];
     setEntries(newEntries);
+
     await addEntry(newEntry);
 
-    // Mostrar notificación
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 2000);
 
-    // Resetear formulario
     resetForm();
   };
 
@@ -170,6 +263,7 @@ export default function ControlHoras() {
    */
   const resetForm = () => {
     const reset = timeManager.getFormReset();
+
     setTripType(reset.tripType);
     setCustomTrip(reset.customTrip);
     setHours(reset.hours);
@@ -177,6 +271,9 @@ export default function ControlHoras() {
     setTimerSeconds(reset.timerSeconds);
     setIsTimerRunning(reset.isTimerRunning);
     setDate(reset.date);
+
+    timerStartTimeRef.current = null;
+    localStorage.removeItem(TIMER_STORAGE_KEY);
   };
 
   /**
@@ -199,7 +296,6 @@ export default function ControlHoras() {
   // ========================================================================
   // RENDERIZADO
   // ========================================================================
-
   return (
     <div
       className={`min-h-screen py-8 px-4 transition-colors duration-500 ${
@@ -235,8 +331,8 @@ export default function ControlHoras() {
           onModeChange={setMode}
           onHoursChange={setHours}
           onMinutesChange={setMinutes}
-          onStartTimer={() => setIsTimerRunning(true)}
-          onStopTimer={() => setIsTimerRunning(false)}
+          onStartTimer={handleStartTimer}
+          onStopTimer={handleStopTimer}
           onAddEntry={handleAddEntry}
           darkMode={darkMode}
         />
