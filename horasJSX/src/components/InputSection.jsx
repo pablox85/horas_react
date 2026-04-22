@@ -58,6 +58,7 @@ export function InputSection({
           >
             <option value="Rendición">Rendición</option>
             <option value="Visita">Visita</option>
+            <option value="Territorio">Territorio</option>
             <option value="custom">Otro (personalizado)</option>
           </select>
         </div>

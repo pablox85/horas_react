@@ -1,35 +1,29 @@
-/**
- * Servicio para exportación a PDF
- * Genera reportes de facturación en formato PDF
- */
-
 import { formatDisplayTime, formatCurrency } from '../utils/formatters';
 import { getHourlyRate } from './calculationService';
 
-/**
- * Genera y descarga un PDF con todas las entradas
- * @param {Array} entries - Array de entradas a exportar
- * @throws {Error} Si no hay jsPDF disponible o error en generación
- */
-export const exportToPDF = (entries) => {
+const createPDFDocument = (entries) => {
   if (entries.length === 0) {
     alert('No hay entradas para exportar');
-    return;
+    return null;
   }
 
   if (!window.jspdf) {
     alert('Error: jsPDF no está cargado');
-    return;
+    return null;
   }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const HOURLY_RATE = getHourlyRate();
+  const HEADER_TO_FIRST_ROW_GAP = 10;
+  const HEADER_SEPARATOR_OFFSET = 5;
+  const ROW_HEIGHT = 8;
 
-  // --- ENCABEZADO ---
   doc.setFontSize(20);
   doc.setTextColor(51, 65, 85);
-  doc.text('Control de Horas - Facturación', 105, 20, { align: 'center' });
+  doc.text('Viaticos - Laurence Larsen', 105, 20, { align: 'center' });
+  doc.setFontSize(10);
+  doc.text('Pablo Perez y Regina Aguilar Rut: 219599720011', 20, 38, { align: 'left' });
 
   doc.setFontSize(10);
   doc.setTextColor(100, 100, 100);
@@ -39,31 +33,27 @@ export const exportToPDF = (entries) => {
   doc.setDrawColor(51, 65, 85);
   doc.line(20, 32, 190, 32);
 
-  // --- TABLA DE ENTRADAS ---
   let yPos = 50;
   doc.setFontSize(11);
   doc.setTextColor(0, 0, 0);
 
-  // Headers de la tabla
   doc.setFont(undefined, 'bold');
   doc.text('Fecha', 20, yPos);
   doc.text('Tipo de Viaje', 50, yPos);
   doc.text('Tiempo', 110, yPos);
   doc.text('Costo', 160, yPos);
 
-  yPos += 10;
-  doc.line(20, yPos - 2, 190, yPos - 2);
+  yPos += HEADER_TO_FIRST_ROW_GAP;
+  const headerSeparatorY = yPos - HEADER_SEPARATOR_OFFSET;
+  doc.line(20, headerSeparatorY, 190, headerSeparatorY);
   doc.setFont(undefined, 'normal');
 
-  // Cálculo de totales
   const totalCost = entries.reduce((sum, entry) => sum + entry.cost, 0);
   const totalHours = entries.reduce((sum, entry) => sum + entry.hours, 0);
 
-  // Renderizado de cada entrada
   entries.forEach((entry) => {
     const timeDisplay = formatDisplayTime(entry.hours);
 
-    // Paginación: nueva página si no hay espacio
     if (yPos > 270) {
       doc.addPage();
       yPos = 20;
@@ -74,10 +64,9 @@ export const exportToPDF = (entries) => {
     doc.text(timeDisplay, 110, yPos);
     doc.text(formatCurrency(entry.cost), 160, yPos);
 
-    yPos += 8;
+    yPos += ROW_HEIGHT;
   });
 
-  // --- TOTALES ---
   yPos += 5;
   doc.setDrawColor(51, 65, 85);
   doc.line(20, yPos, 190, yPos);
@@ -93,14 +82,30 @@ export const exportToPDF = (entries) => {
   doc.text(totalTimeDisplay, 110, yPos);
   doc.text(formatCurrency(totalCost), 160, yPos);
 
-  // --- PIE DE PÁGINA ---
   yPos += 15;
   doc.setFontSize(9);
   doc.setFont(undefined, 'normal');
   doc.setTextColor(100, 100, 100);
   doc.text(`Tarifa por hora: ${formatCurrency(HOURLY_RATE)}`, 105, yPos, { align: 'center' });
 
-  // Descarga del archivo
+  return doc;
+};
+
+export const createPDFPreview = (entries) => {
+  const doc = createPDFDocument(entries);
+  if (!doc) return null;
+
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
   const fileName = `facturacion_${new Date().toISOString().split('T')[0]}.pdf`;
+
+  return { url, fileName };
+};
+
+export const exportToPDF = (entries) => {
+  const doc = createPDFDocument(entries);
+  if (!doc) return;
+
+  const fileName = `Viaticos_${new Date().toISOString().split('T')[0]}.pdf`;
   doc.save(fileName);
 };

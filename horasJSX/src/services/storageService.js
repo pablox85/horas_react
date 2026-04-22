@@ -1,6 +1,6 @@
 /**
- * Servicio de persistencia con Firebase Firestore
- * Maneja lectura y escritura de datos en la nube
+ * Servicio de persistencia híbrido.
+ * Usa Firestore cuando hay configuración disponible y localStorage como fallback.
  */
 
 import {
@@ -14,16 +14,65 @@ import {
   setDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, hasFirebaseConfig } from './firebase';
 
 const ENTRIES_COLLECTION = 'entries';
 const TOTALS_DOC = 'totals/global';
+const LOCAL_ENTRIES_KEY = 'billing-entries';
+const LOCAL_TOTALS_KEY = 'billing-totals';
+
+const isBrowser = typeof window !== 'undefined';
+
+const readLocalJSON = (key, fallback) => {
+  if (!isBrowser) return fallback;
+
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (error) {
+    console.error(`Error leyendo ${key} desde localStorage:`, error);
+    return fallback;
+  }
+};
+
+const writeLocalJSON = (key, value) => {
+  if (!isBrowser) return;
+
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.error(`Error guardando ${key} en localStorage:`, error);
+  }
+};
+
+const removeLocalKey = (key) => {
+  if (!isBrowser) return;
+
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.error(`Error eliminando ${key} de localStorage:`, error);
+  }
+};
+
+const sortByCreatedAtDesc = (entries) =>
+  [...entries].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+
+const readLocalEntries = () => sortByCreatedAtDesc(readLocalJSON(LOCAL_ENTRIES_KEY, []));
+
+const writeLocalEntries = (entries) => {
+  writeLocalJSON(LOCAL_ENTRIES_KEY, sortByCreatedAtDesc(entries));
+};
 
 /**
  * Carga entradas desde Firestore, ordenadas por más recientes
  * @returns {Promise<Array>} Array de entradas
  */
 export const fetchEntries = async () => {
+  if (!hasFirebaseConfig || !db) {
+    return readLocalEntries();
+  }
+
   try {
     const q = query(
       collection(db, ENTRIES_COLLECTION),
@@ -39,7 +88,7 @@ export const fetchEntries = async () => {
     });
   } catch (error) {
     console.error('Error al cargar entradas:', error);
-    return [];
+    return readLocalEntries();
   }
 };
 
@@ -48,11 +97,25 @@ export const fetchEntries = async () => {
  * @param {object} entry - Entrada a guardar
  */
 export const addEntry = async (entry) => {
+  if (!hasFirebaseConfig || !db) {
+    const currentEntries = readLocalEntries();
+    writeLocalEntries([
+      ...currentEntries.filter((item) => String(item.id) !== String(entry.id)),
+      entry,
+    ]);
+    return;
+  }
+
   try {
     const entryRef = doc(db, ENTRIES_COLLECTION, String(entry.id));
     await setDoc(entryRef, entry);
   } catch (error) {
     console.error('Error al guardar entrada:', error);
+    const currentEntries = readLocalEntries();
+    writeLocalEntries([
+      ...currentEntries.filter((item) => String(item.id) !== String(entry.id)),
+      entry,
+    ]);
     throw error;
   }
 };
@@ -62,10 +125,22 @@ export const addEntry = async (entry) => {
  * @param {string|number} id - ID de la entrada
  */
 export const deleteEntry = async (id) => {
+  if (!hasFirebaseConfig || !db) {
+    const currentEntries = readLocalEntries().filter(
+      (entry) => String(entry.id) !== String(id)
+    );
+    writeLocalEntries(currentEntries);
+    return;
+  }
+
   try {
     await deleteDoc(doc(db, ENTRIES_COLLECTION, String(id)));
   } catch (error) {
     console.error('Error al eliminar entrada:', error);
+    const currentEntries = readLocalEntries().filter(
+      (entry) => String(entry.id) !== String(id)
+    );
+    writeLocalEntries(currentEntries);
     throw error;
   }
 };
@@ -74,6 +149,12 @@ export const deleteEntry = async (id) => {
  * Limpia todas las entradas en Firestore
  */
 export const clearEntries = async () => {
+  if (!hasFirebaseConfig || !db) {
+    removeLocalKey(LOCAL_ENTRIES_KEY);
+    removeLocalKey(LOCAL_TOTALS_KEY);
+    return;
+  }
+
   try {
     const snapshot = await getDocs(collection(db, ENTRIES_COLLECTION));
     const batch = writeBatch(db);
@@ -81,6 +162,8 @@ export const clearEntries = async () => {
     await batch.commit();
   } catch (error) {
     console.error('Error al limpiar entradas:', error);
+    removeLocalKey(LOCAL_ENTRIES_KEY);
+    removeLocalKey(LOCAL_TOTALS_KEY);
     throw error;
   }
 };
@@ -90,6 +173,14 @@ export const clearEntries = async () => {
  * @param {object} totals - Totales a guardar
  */
 export const saveTotals = async (totals) => {
+  if (!hasFirebaseConfig || !db) {
+    writeLocalJSON(LOCAL_TOTALS_KEY, {
+      ...totals,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
   try {
     await setDoc(doc(db, TOTALS_DOC), {
       ...totals,
@@ -97,6 +188,10 @@ export const saveTotals = async (totals) => {
     }, { merge: true });
   } catch (error) {
     console.error('Error al guardar totales:', error);
+    writeLocalJSON(LOCAL_TOTALS_KEY, {
+      ...totals,
+      updatedAt: Date.now(),
+    });
   }
 };
 
@@ -105,11 +200,15 @@ export const saveTotals = async (totals) => {
  * @returns {Promise<object|null>} Totales o null
  */
 export const fetchTotals = async () => {
+  if (!hasFirebaseConfig || !db) {
+    return readLocalJSON(LOCAL_TOTALS_KEY, null);
+  }
+
   try {
     const snap = await getDoc(doc(db, TOTALS_DOC));
-    return snap.exists() ? snap.data() : null;
+    return snap.exists() ? snap.data() : readLocalJSON(LOCAL_TOTALS_KEY, null);
   } catch (error) {
     console.error('Error al cargar totales:', error);
-    return null;
+    return readLocalJSON(LOCAL_TOTALS_KEY, null);
   }
 };

@@ -8,10 +8,10 @@
  * @returns {string} Tiempo formateado (ej: "01:30:45")
  */
 export const formatTime = (seconds) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  const h = Math.floor(seconds / 3600); // Calcula horas completas dentro del total de segundos.
+  const m = Math.floor((seconds % 3600) / 60); // Calcula minutos restantes luego de sacar las horas.
+  const s = seconds % 60; // Calcula los segundos restantes finales.
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; // Devuelve HH:MM:SS con dos dígitos por bloque.
 };
 
 /**
@@ -20,9 +20,9 @@ export const formatTime = (seconds) => {
  * @returns {string} Tiempo formateado para mostrar
  */
 export const formatDisplayTime = (totalHours) => {
-  const h = Math.floor(totalHours);
-  const m = Math.round((totalHours - h) * 60);
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  const h = Math.floor(totalHours); // Obtiene la parte entera en horas.
+  const m = Math.round((totalHours - h) * 60); // Convierte la parte decimal de horas a minutos.
+  return m > 0 ? `${h}h ${m}m` : `${h}h`; // Si hay minutos los muestra; si no, solo muestra horas.
 };
 
 /**
@@ -31,8 +31,8 @@ export const formatDisplayTime = (totalHours) => {
  * @returns {string} Fecha formateada
  */
 export const formatDateDisplay = (dateString) => {
-  const [year, month, day] = dateString.split('-');
-  return `${day}/${month}/${year}`;
+  const [year, month, day] = dateString.split('-'); // Separa YYYY-MM-DD en tres partes.
+  return `${day}/${month}/${year}`; // Reordena al formato DD/MM/YYYY.
 };
 
 /**
@@ -41,5 +41,5 @@ export const formatDateDisplay = (dateString) => {
  * @returns {string} Cantidad formateada con $
  */
 export const formatCurrency = (amount) => {
-  return `$${amount.toFixed(2)}`;
+  return `$${amount.toFixed(2)}`; // Formatea con símbolo $ y dos decimales fijos.
 };

@@ -16,7 +16,7 @@ const missingVars = requiredEnvVars.filter(
 );
 
 if (missingVars.length > 0) {
-  console.error('❌ Variables de entorno faltantes:', missingVars);
+  console.warn('Variables de entorno faltantes para Firebase:', missingVars);
 }
 
 const firebaseConfig = {
@@ -32,11 +32,19 @@ const firebaseConfig = {
 console.log('🔥 Configuración de Firebase:', firebaseConfig);
 
 let app;
+let db = null;
+export const hasFirebaseConfig = missingVars.length === 0;
+
 try {
-  app = initializeApp(firebaseConfig);
-  console.log('✅ Firebase inicializado correctamente');
+  if (hasFirebaseConfig) {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    console.log('Firebase inicializado correctamente');
+  }
 } catch (error) {
-  console.error('❌ Error al inicializar Firebase:', error);
+  console.error('Error al inicializar Firebase:', error);
+  app = null;
+  db = null;
 }
 
-export const db = getFirestore(app);
+export { db };

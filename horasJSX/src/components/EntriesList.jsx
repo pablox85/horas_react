@@ -4,10 +4,16 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { FileText, Clock, Trash2 } from 'lucide-react';
+import { FileText, Clock, Trash2, ArrowUpDown } from 'lucide-react';
 import { formatDisplayTime, formatCurrency } from '../utils/formatters';
 
-export function EntriesList({ entries, onDeleteEntry, darkMode }) {
+export function EntriesList({
+  entries,
+  onDeleteEntry,
+  orderMode,
+  onToggleOrderMode,
+  darkMode,
+}) {
   const firstEntryRef = useRef(null);
 
   useEffect(() => {
@@ -17,14 +23,27 @@ export function EntriesList({ entries, onDeleteEntry, darkMode }) {
 
   return (
     <div className="mb-8">
-      <h2
-        className={`text-2xl font-bold mb-5 flex items-center gap-3 ${
-          darkMode ? 'text-white' : 'text-slate-900'
-        }`}
-      >
-        <FileText className="w-6 h-6" />
-        Historial de Entradas
-      </h2>
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <h2
+          className={`text-2xl font-bold flex items-center gap-3 ${
+            darkMode ? 'text-white' : 'text-slate-900'
+          }`}
+        >
+          <FileText className="w-6 h-6" />
+          Historial de Entradas
+        </h2>
+        <button
+          onClick={onToggleOrderMode}
+          className={`py-2 px-4 rounded-lg font-semibold transition-all duration-300 flex items-center gap-2 ${
+            darkMode
+              ? 'bg-slate-700 hover:bg-slate-600 text-white'
+              : 'bg-slate-200 hover:bg-slate-300 text-slate-900'
+          }`}
+        >
+          <ArrowUpDown className="w-4 h-4" />
+          {orderMode === 'date' ? 'Orden: Fecha' : 'Orden: Manual'}
+        </button>
+      </div>
       <div className="space-y-3">
         {entries.length === 0 ? (
           <div

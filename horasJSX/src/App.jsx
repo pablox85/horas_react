@@ -4,12 +4,13 @@
  * ============================================================================
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Header } from './components/Header';
 import { InputSection } from './components/InputSection';
 import { EntriesList } from './components/EntriesList';
 import { TotalSection } from './components/TotalSection';
 import { NotificationSuccess } from './components/NotificationSuccess';
+import { ParallelPage } from './components/ParallelPage';
 import { useTimeManager } from './hooks/useTimeManager';
 import {
   fetchEntries,
@@ -18,10 +19,26 @@ import {
   clearEntries,
   saveTotals,
 } from './services/storageService';
-import { calculateTotals, getHourlyRate } from './services/calculationService';
-import { exportToPDF } from './services/pdfService';
+import {
+  calculateCost,
+  calculateTotals,
+  getHourlyRate,
+} from './services/calculationService';
+import { createPDFPreview, exportToPDF } from './services/pdfService';
 
 const TIMER_STORAGE_KEY = 'horas_react_timer';
+
+const parseEntryDateToTimestamp = (entryDate) => {
+  if (!entryDate || typeof entryDate !== 'string') return 0;
+
+  const parts = entryDate.split('/');
+  if (parts.length !== 3) return 0;
+
+  const [day, month, year] = parts.map((value) => Number(value));
+  if (!day || !month || !year) return 0;
+
+  return new Date(year, month - 1, day).getTime();
+};
 
 export default function ControlHoras() {
   const [entries, setEntries] = useState([]);
@@ -35,6 +52,10 @@ export default function ControlHoras() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
+  const [currentView, setCurrentView] = useState('control');
+  const [entryOrderMode, setEntryOrderMode] = useState('date');
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState('');
 
   const lastAutoDateRef = useRef('');
   const timerStartTimeRef = useRef(null);
@@ -92,8 +113,14 @@ export default function ControlHoras() {
 
     const updateDate = () => {
       const today = getToday();
-      lastAutoDateRef.current = today;
-      setDate(today);
+      setDate((currentDate) => {
+        const shouldAutoUpdate =
+          !currentDate || currentDate === lastAutoDateRef.current;
+
+        lastAutoDateRef.current = today;
+
+        return shouldAutoUpdate ? today : currentDate;
+      });
     };
 
     updateDate();
@@ -172,6 +199,15 @@ export default function ControlHoras() {
 
   const { totalCost, totalHours } = calculateTotals(entries);
   const hourlyRate = getHourlyRate();
+  const sortedEntries = useMemo(() => {
+    return [...entries].sort((a, b) => {
+      const dateDiff =
+        parseEntryDateToTimestamp(b.date) - parseEntryDateToTimestamp(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+    });
+  }, [entries]);
+  const displayedEntries = entryOrderMode === 'date' ? sortedEntries : entries;
 
   useEffect(() => {
     saveTotals({ totalCost, totalHours });
@@ -245,8 +281,64 @@ export default function ControlHoras() {
   };
 
   const handleExportPDF = () => {
-    exportToPDF(entries);
+    const preview = createPDFPreview(displayedEntries);
+    if (!preview) return;
+
+    setPdfPreviewUrl(preview.url);
+    setShowPdfPreview(true);
   };
+
+  const handleClosePDFPreview = () => {
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+    }
+    setPdfPreviewUrl('');
+    setShowPdfPreview(false);
+  };
+
+  const handleDownloadFromPreview = () => {
+    exportToPDF(displayedEntries);
+    handleClosePDFPreview();
+  };
+
+  const handleImportEntriesFromPDF = async (rows) => {
+    const baseNow = Date.now();
+    const imported = rows.map((row, index) => {
+      const hoursValue = Number(row.hours) || 0;
+      const createdAt = baseNow + index;
+      return {
+        id: createdAt,
+        createdAt,
+        tripType: row.tripType,
+        date: row.date,
+        hours: hoursValue,
+        cost: calculateCost(hoursValue),
+      };
+    });
+
+    if (imported.length === 0) return;
+
+    setEntries((current) => [...imported, ...current]);
+
+    try {
+      await Promise.all(imported.map((entry) => addEntry(entry)));
+    } catch (error) {
+      console.error('Error importando entradas desde PDF:', error);
+      alert('Se importaron en pantalla, pero hubo error al guardar algunas entradas.');
+    }
+
+    setCurrentView('control');
+    setShowSuccess(true);
+    setTimeout(() => setShowSuccess(false), 2000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pdfPreviewUrl) {
+        URL.revokeObjectURL(pdfPreviewUrl);
+      }
+    };
+  }, [pdfPreviewUrl]);
 
   return (
     <div
@@ -256,51 +348,118 @@ export default function ControlHoras() {
           : 'bg-gradient-to-br from-slate-50 via-white to-slate-100'
       }`}
     >
-      <div className="max-w-4xl mx-auto">
-        <NotificationSuccess show={showSuccess} darkMode={darkMode} />
+      {currentView === 'control' ? (
+        <div className="max-w-4xl mx-auto">
+          <NotificationSuccess show={showSuccess} darkMode={darkMode} />
 
-        <Header
-          darkMode={darkMode}
-          onToggleTheme={() => setDarkMode(!darkMode)}
-          hourlyRate={hourlyRate}
-        />
+          <Header
+            darkMode={darkMode}
+            onToggleTheme={() => setDarkMode(!darkMode)}
+            onOpenParallel={() => setCurrentView('parallel')}
+            hourlyRate={hourlyRate}
+          />
 
-        <InputSection
-          tripType={tripType}
-          customTrip={customTrip}
-          date={date}
-          mode={mode}
-          hours={hours}
-          minutes={minutes}
-          timerSeconds={timerSeconds}
-          isTimerRunning={isTimerRunning}
-          onTripTypeChange={setTripType}
-          onCustomTripChange={setCustomTrip}
-          onDateChange={() => setDate(lastAutoDateRef.current)}
-          onModeChange={setMode}
-          onHoursChange={setHours}
-          onMinutesChange={setMinutes}
-          onStartTimer={handleStartTimer}
-          onStopTimer={handleStopTimer}
-          onAddEntry={handleAddEntry}
-          darkMode={darkMode}
-        />
+          <InputSection
+            tripType={tripType}
+            customTrip={customTrip}
+            date={date}
+            mode={mode}
+            hours={hours}
+            minutes={minutes}
+            timerSeconds={timerSeconds}
+            isTimerRunning={isTimerRunning}
+            onTripTypeChange={setTripType}
+            onCustomTripChange={setCustomTrip}
+            onDateChange={setDate}
+            onModeChange={setMode}
+            onHoursChange={setHours}
+            onMinutesChange={setMinutes}
+            onStartTimer={handleStartTimer}
+            onStopTimer={handleStopTimer}
+            onAddEntry={handleAddEntry}
+            darkMode={darkMode}
+          />
 
-        <EntriesList
-          entries={entries}
-          onDeleteEntry={handleDeleteEntry}
-          darkMode={darkMode}
-        />
+          <EntriesList
+            entries={displayedEntries}
+            onDeleteEntry={handleDeleteEntry}
+            orderMode={entryOrderMode}
+            onToggleOrderMode={() =>
+              setEntryOrderMode((mode) => (mode === 'date' ? 'manual' : 'date'))
+            }
+            darkMode={darkMode}
+          />
 
-        <TotalSection
-          totalCost={totalCost}
-          totalHours={totalHours}
-          hasEntries={entries.length > 0}
-          onExportPDF={handleExportPDF}
-          onResetMonth={handleResetMonth}
+          <TotalSection
+            totalCost={totalCost}
+            totalHours={totalHours}
+            hasEntries={entries.length > 0}
+            onExportPDF={handleExportPDF}
+            onResetMonth={handleResetMonth}
+            darkMode={darkMode}
+          />
+        </div>
+      ) : (
+        <ParallelPage
           darkMode={darkMode}
+          onBack={() => setCurrentView('control')}
+          onImportEntries={handleImportEntriesFromPDF}
         />
-      </div>
+      )}
+
+      {showPdfPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div
+            className={`w-full max-w-5xl h-[90vh] rounded-2xl border shadow-2xl flex flex-col ${
+              darkMode
+                ? 'bg-slate-900 border-slate-700'
+                : 'bg-white border-slate-300'
+            }`}
+          >
+            <div
+              className={`px-4 py-3 border-b flex items-center justify-between ${
+                darkMode ? 'border-slate-700' : 'border-slate-200'
+              }`}
+            >
+              <p className={`font-semibold ${darkMode ? 'text-white' : 'text-slate-900'}`}>
+                Vista previa del PDF
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDownloadFromPreview}
+                  className={`py-2 px-4 rounded-lg font-semibold transition-colors ${
+                    darkMode
+                      ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                      : 'bg-slate-800 hover:bg-slate-700 text-white'
+                  }`}
+                >
+                  Descargar PDF
+                </button>
+                <button
+                  onClick={handleClosePDFPreview}
+                  className={`py-2 px-4 rounded-lg font-semibold transition-colors ${
+                    darkMode
+                      ? 'bg-slate-700 hover:bg-slate-600 text-white'
+                      : 'bg-slate-200 hover:bg-slate-300 text-slate-900'
+                  }`}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1">
+              {pdfPreviewUrl && (
+                <iframe
+                  src={pdfPreviewUrl}
+                  title="Vista previa PDF"
+                  className="w-full h-full rounded-b-2xl"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         @keyframes fadeIn {

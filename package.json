@@ -1,0 +1,11 @@
+{
+  "name": "horas_react",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix horasJSX run dev",
+    "dv": "npm --prefix horasJSX run dev",
+    "build": "npm --prefix horasJSX run build",
+    "preview": "npm --prefix horasJSX run preview",
+    "lint": "npm --prefix horasJSX run lint"
+  }
+}
