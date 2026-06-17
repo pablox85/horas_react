@@ -30,8 +30,17 @@ export default function CompaniesPage() {
   const refresh = useCallback(async () => {
     if (!tenantId) return;
     setLoading(true);
-    setCompanies(await listCompanies(tenantId));
-    setLoading(false);
+    setError("");
+
+    try {
+      setCompanies(await listCompanies(tenantId));
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "No se pudieron cargar las empresas.";
+      console.error("Error cargando empresas:", caught);
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   }, [tenantId]);
 
   useEffect(() => {
@@ -66,8 +75,12 @@ export default function CompaniesPage() {
 
   async function handleDelete(id: string) {
     if (!tenantId || !window.confirm("Eliminar empresa?")) return;
-    await deleteCompany(id, tenantId);
-    await refresh();
+    try {
+      await deleteCompany(id, tenantId);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "No se pudo eliminar la empresa.");
+    }
   }
 
   function startEdit(company: Company) {
@@ -113,6 +126,11 @@ export default function CompaniesPage() {
         </section>
 
         <section className="grid gap-4">
+          {error && !loading ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">
+              {error}
+            </div>
+          ) : null}
           {loading ? (
             <div className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">Cargando...</div>
           ) : companies.length === 0 ? (

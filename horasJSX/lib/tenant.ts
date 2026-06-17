@@ -9,8 +9,7 @@ const DEFAULT_TENANT_PREFIX = "tenant";
 export function sanitizeTenantId(value: string): string {
   const normalized = value
     .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
   return normalized || "default";

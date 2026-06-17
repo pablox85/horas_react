@@ -9,7 +9,6 @@ import {
   getDoc,
   getDocs,
   limit,
-  orderBy,
   query,
   setDoc,
   where,
@@ -139,13 +138,13 @@ async function listByTenant<T extends TenantEntity>(
   }
 
   const firestore = requireDb();
-  const q = query(
-    collection(firestore, collectionName),
-    where("tenantId", "==", safeTenantId),
-    orderBy(sortField, "desc"),
-  );
+  const q = query(collection(firestore, collectionName), where("tenantId", "==", safeTenantId));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((item) => docWithTenant<T>(item, safeTenantId));
+  return snapshot.docs
+    .map((item) => docWithTenant<T>(item, safeTenantId))
+    .sort((a, b) =>
+      compareLocalValues(getSortableValue(b, sortField), getSortableValue(a, sortField)),
+    );
 }
 
 async function getByTenant<T extends TenantEntity>(
@@ -303,24 +302,19 @@ export async function listHourRecords(
   }
 
   const firestore = requireDb();
-  const constraints = [
-    where("tenantId", "==", safeTenantId),
-    orderBy("date", "desc"),
-    limit(250),
-  ];
-
-  if (filters?.employeeId) {
-    constraints.unshift(where("employeeId", "==", filters.employeeId));
-  }
-
-  const snapshot = await getDocs(query(collection(firestore, "hourRecords"), ...constraints));
+  const snapshot = await getDocs(
+    query(collection(firestore, "hourRecords"), where("tenantId", "==", safeTenantId), limit(250)),
+  );
   const records = snapshot.docs.map((item) => docWithTenant<HourRecord>(item, safeTenantId));
 
-  return records.filter((record) => {
-    if (filters?.from && record.date < filters.from) return false;
-    if (filters?.to && record.date > filters.to) return false;
-    return true;
-  });
+  return records
+    .filter((record) => {
+      if (filters?.employeeId && record.employeeId !== filters.employeeId) return false;
+      if (filters?.from && record.date < filters.from) return false;
+      if (filters?.to && record.date > filters.to) return false;
+      return true;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export async function saveHourRecord(
