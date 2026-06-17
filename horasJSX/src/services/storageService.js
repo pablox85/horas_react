@@ -15,10 +15,13 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, hasFirebaseConfig } from './firebase';
+import { getTenantId } from './tenantService';
 
+const TENANTS_COLLECTION = 'tenants';
 const ENTRIES_COLLECTION = 'entries';
 const DISTANCE_ENTRIES_COLLECTION = 'distanceEntries';
-const TOTALS_DOC = 'totals/global';
+const TOTALS_COLLECTION = 'totals';
+const TOTALS_DOC_ID = 'global';
 const LOCAL_ENTRIES_KEY = 'billing-entries';
 const LOCAL_DISTANCE_ENTRIES_KEY = 'distance-trip-entries';
 const LOCAL_TOTALS_KEY = 'billing-totals';
@@ -60,17 +63,40 @@ const removeLocalKey = (key) => {
 const sortByCreatedAtDesc = (entries) =>
   [...entries].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
-const readLocalEntries = () => sortByCreatedAtDesc(readLocalJSON(LOCAL_ENTRIES_KEY, []));
+const getTenantLocalKey = (key) => `${key}:${getTenantId()}`;
+
+const readTenantLocalJSON = (key, fallback) => {
+  const tenantValue = readLocalJSON(getTenantLocalKey(key), null);
+  if (tenantValue !== null) return tenantValue;
+  return readLocalJSON(key, fallback);
+};
+
+const writeTenantLocalJSON = (key, value) => {
+  writeLocalJSON(getTenantLocalKey(key), value);
+};
+
+const removeTenantLocalKey = (key) => {
+  removeLocalKey(getTenantLocalKey(key));
+};
+
+const getTenantCollection = (collectionName) =>
+  collection(db, TENANTS_COLLECTION, getTenantId(), collectionName);
+
+const getTenantDoc = (collectionName, docId) =>
+  doc(db, TENANTS_COLLECTION, getTenantId(), collectionName, docId);
+
+const readLocalEntries = () =>
+  sortByCreatedAtDesc(readTenantLocalJSON(LOCAL_ENTRIES_KEY, []));
 
 const writeLocalEntries = (entries) => {
-  writeLocalJSON(LOCAL_ENTRIES_KEY, sortByCreatedAtDesc(entries));
+  writeTenantLocalJSON(LOCAL_ENTRIES_KEY, sortByCreatedAtDesc(entries));
 };
 
 const readLocalDistanceEntries = () =>
-  sortByCreatedAtDesc(readLocalJSON(LOCAL_DISTANCE_ENTRIES_KEY, []));
+  sortByCreatedAtDesc(readTenantLocalJSON(LOCAL_DISTANCE_ENTRIES_KEY, []));
 
 const writeLocalDistanceEntries = (entries) => {
-  writeLocalJSON(LOCAL_DISTANCE_ENTRIES_KEY, sortByCreatedAtDesc(entries));
+  writeTenantLocalJSON(LOCAL_DISTANCE_ENTRIES_KEY, sortByCreatedAtDesc(entries));
 };
 
 /**
@@ -84,7 +110,7 @@ export const fetchEntries = async () => {
 
   try {
     const q = query(
-      collection(db, ENTRIES_COLLECTION),
+      getTenantCollection(ENTRIES_COLLECTION),
       orderBy('createdAt', 'desc')
     );
     const snapshot = await getDocs(q);
@@ -116,7 +142,7 @@ export const addEntry = async (entry) => {
   }
 
   try {
-    const entryRef = doc(db, ENTRIES_COLLECTION, String(entry.id));
+    const entryRef = getTenantDoc(ENTRIES_COLLECTION, String(entry.id));
     await setDoc(entryRef, entry);
   } catch (error) {
     console.error('Error al guardar entrada:', error);
@@ -143,7 +169,7 @@ export const deleteEntry = async (id) => {
   }
 
   try {
-    await deleteDoc(doc(db, ENTRIES_COLLECTION, String(id)));
+    await deleteDoc(getTenantDoc(ENTRIES_COLLECTION, String(id)));
   } catch (error) {
     console.error('Error al eliminar entrada:', error);
     const currentEntries = readLocalEntries().filter(
@@ -159,20 +185,20 @@ export const deleteEntry = async (id) => {
  */
 export const clearEntries = async () => {
   if (!hasFirebaseConfig || !db) {
-    removeLocalKey(LOCAL_ENTRIES_KEY);
-    removeLocalKey(LOCAL_TOTALS_KEY);
+    removeTenantLocalKey(LOCAL_ENTRIES_KEY);
+    removeTenantLocalKey(LOCAL_TOTALS_KEY);
     return;
   }
 
   try {
-    const snapshot = await getDocs(collection(db, ENTRIES_COLLECTION));
+    const snapshot = await getDocs(getTenantCollection(ENTRIES_COLLECTION));
     const batch = writeBatch(db);
     snapshot.docs.forEach((docSnap) => batch.delete(docSnap.ref));
     await batch.commit();
   } catch (error) {
     console.error('Error al limpiar entradas:', error);
-    removeLocalKey(LOCAL_ENTRIES_KEY);
-    removeLocalKey(LOCAL_TOTALS_KEY);
+    removeTenantLocalKey(LOCAL_ENTRIES_KEY);
+    removeTenantLocalKey(LOCAL_TOTALS_KEY);
     throw error;
   }
 };
@@ -183,7 +209,7 @@ export const clearEntries = async () => {
  */
 export const saveTotals = async (totals) => {
   if (!hasFirebaseConfig || !db) {
-    writeLocalJSON(LOCAL_TOTALS_KEY, {
+    writeTenantLocalJSON(LOCAL_TOTALS_KEY, {
       ...totals,
       updatedAt: Date.now(),
     });
@@ -191,13 +217,13 @@ export const saveTotals = async (totals) => {
   }
 
   try {
-    await setDoc(doc(db, TOTALS_DOC), {
+    await setDoc(getTenantDoc(TOTALS_COLLECTION, TOTALS_DOC_ID), {
       ...totals,
       updatedAt: Date.now(),
     }, { merge: true });
   } catch (error) {
     console.error('Error al guardar totales:', error);
-    writeLocalJSON(LOCAL_TOTALS_KEY, {
+    writeTenantLocalJSON(LOCAL_TOTALS_KEY, {
       ...totals,
       updatedAt: Date.now(),
     });
@@ -210,15 +236,15 @@ export const saveTotals = async (totals) => {
  */
 export const fetchTotals = async () => {
   if (!hasFirebaseConfig || !db) {
-    return readLocalJSON(LOCAL_TOTALS_KEY, null);
+    return readTenantLocalJSON(LOCAL_TOTALS_KEY, null);
   }
 
   try {
-    const snap = await getDoc(doc(db, TOTALS_DOC));
-    return snap.exists() ? snap.data() : readLocalJSON(LOCAL_TOTALS_KEY, null);
+    const snap = await getDoc(getTenantDoc(TOTALS_COLLECTION, TOTALS_DOC_ID));
+    return snap.exists() ? snap.data() : readTenantLocalJSON(LOCAL_TOTALS_KEY, null);
   } catch (error) {
     console.error('Error al cargar totales:', error);
-    return readLocalJSON(LOCAL_TOTALS_KEY, null);
+    return readTenantLocalJSON(LOCAL_TOTALS_KEY, null);
   }
 };
 
@@ -229,7 +255,7 @@ export const fetchDistanceEntries = async () => {
 
   try {
     const q = query(
-      collection(db, DISTANCE_ENTRIES_COLLECTION),
+      getTenantCollection(DISTANCE_ENTRIES_COLLECTION),
       orderBy('createdAt', 'desc')
     );
     const snapshot = await getDocs(q);
@@ -257,7 +283,7 @@ export const addDistanceEntry = async (entry) => {
   }
 
   try {
-    await setDoc(doc(db, DISTANCE_ENTRIES_COLLECTION, String(entry.id)), entry);
+    await setDoc(getTenantDoc(DISTANCE_ENTRIES_COLLECTION, String(entry.id)), entry);
   } catch (error) {
     console.error('Error al guardar viaje por distancia:', error);
     const currentEntries = readLocalDistanceEntries();
@@ -279,7 +305,7 @@ export const deleteDistanceEntry = async (id) => {
   }
 
   try {
-    await deleteDoc(doc(db, DISTANCE_ENTRIES_COLLECTION, String(id)));
+    await deleteDoc(getTenantDoc(DISTANCE_ENTRIES_COLLECTION, String(id)));
   } catch (error) {
     console.error('Error al eliminar viaje por distancia:', error);
     const currentEntries = readLocalDistanceEntries().filter(
@@ -292,18 +318,18 @@ export const deleteDistanceEntry = async (id) => {
 
 export const clearDistanceEntries = async () => {
   if (!hasFirebaseConfig || !db) {
-    removeLocalKey(LOCAL_DISTANCE_ENTRIES_KEY);
+    removeTenantLocalKey(LOCAL_DISTANCE_ENTRIES_KEY);
     return;
   }
 
   try {
-    const snapshot = await getDocs(collection(db, DISTANCE_ENTRIES_COLLECTION));
+    const snapshot = await getDocs(getTenantCollection(DISTANCE_ENTRIES_COLLECTION));
     const batch = writeBatch(db);
     snapshot.docs.forEach((docSnap) => batch.delete(docSnap.ref));
     await batch.commit();
   } catch (error) {
     console.error('Error al limpiar viajes por distancia:', error);
-    removeLocalKey(LOCAL_DISTANCE_ENTRIES_KEY);
+    removeTenantLocalKey(LOCAL_DISTANCE_ENTRIES_KEY);
     throw error;
   }
 };
