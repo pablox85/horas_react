@@ -1,0 +1,328 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { ProtectedPage } from "@/components/layout/protected-page";
+import { Button } from "@/components/ui/button";
+import { Field, SelectInput, TextInput } from "@/components/ui/field";
+import { formatCurrency, formatISODate } from "@/lib/formatters";
+import { useAuth } from "@/hooks/use-auth";
+import { calculateKmCost } from "@/services/calculation-service";
+import {
+  deleteDistanceTrip,
+  listCompanies,
+  listDistanceTrips,
+  saveDistanceTrip,
+} from "@/services/firestore-service";
+import { exportDistanceTripsToPDF } from "@/services/pdf-service";
+import type { Company, DistanceTrip, UpsertDistanceTripInput } from "@/types/models";
+
+interface TripForm {
+  tripName: string;
+  companyId: string;
+  date: string;
+  kilometers: number;
+  ratePerKm: number;
+}
+
+const emptyForm: TripForm = {
+  tripName: "",
+  companyId: "",
+  date: formatISODate(new Date()),
+  kilometers: 0,
+  ratePerKm: 0,
+};
+
+export default function DistanceTripsPage() {
+  const { tenantId } = useAuth();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [trips, setTrips] = useState<DistanceTrip[]>([]);
+  const [form, setForm] = useState<TripForm>(emptyForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const companyName = useMemo(
+    () => new Map(companies.map((company) => [company.id, company.name])),
+    [companies],
+  );
+  const currentCost = calculateKmCost(
+    Number(form.kilometers) || 0,
+    Number(form.ratePerKm) || 0,
+  );
+  const totals = useMemo(
+    () =>
+      trips.reduce(
+        (acc, trip) => ({
+          kilometers: acc.kilometers + trip.kilometers,
+          cost: acc.cost + trip.cost,
+        }),
+        { kilometers: 0, cost: 0 },
+      ),
+    [trips],
+  );
+
+  const refresh = useCallback(async () => {
+    if (!tenantId) return;
+
+    setLoading(true);
+    const [nextCompanies, nextTrips] = await Promise.all([
+      listCompanies(tenantId),
+      listDistanceTrips(tenantId),
+    ]);
+    setCompanies(nextCompanies);
+    setTrips(nextTrips);
+    setLoading(false);
+  }, [tenantId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!tenantId) return;
+
+    const tripName = form.tripName.trim();
+    const kilometers = Number(form.kilometers) || 0;
+    const ratePerKm = Number(form.ratePerKm) || 0;
+
+    if (!tripName || !form.date || kilometers <= 0 || ratePerKm <= 0) {
+      setError("Ingresa viaje, fecha, kilometros y precio por km validos.");
+      return;
+    }
+
+    const input: UpsertDistanceTripInput = {
+      tripName,
+      companyId: form.companyId || undefined,
+      date: form.date,
+      kilometers,
+      ratePerKm,
+      cost: calculateKmCost(kilometers, ratePerKm),
+    };
+
+    try {
+      setError("");
+      await saveDistanceTrip(tenantId, input, editingId ?? undefined);
+      setForm(emptyForm);
+      setEditingId(null);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "No se pudo guardar el viaje.");
+    }
+  }
+
+  function startEdit(trip: DistanceTrip) {
+    setEditingId(trip.id);
+    setForm({
+      tripName: trip.tripName,
+      companyId: trip.companyId ?? "",
+      date: trip.date,
+      kilometers: trip.kilometers,
+      ratePerKm: trip.ratePerKm,
+    });
+  }
+
+  async function handleDelete(id: string) {
+    if (!tenantId || !window.confirm("Eliminar viaje por distancia?")) return;
+
+    await deleteDistanceTrip(id, tenantId);
+    await refresh();
+  }
+
+  return (
+    <ProtectedPage>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold">Viajes por distancia</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Calcula el importe como kilometros multiplicados por el precio manual por km.
+        </p>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-4 text-xl font-bold">
+            {editingId ? "Editar viaje" : "Nuevo viaje"}
+          </h3>
+          <form className="grid gap-4" onSubmit={handleSubmit}>
+            <Field label="Viaje">
+              <TextInput
+                required
+                placeholder="Ej: Montevideo - Las Piedras"
+                value={form.tripName}
+                onChange={(event) => setForm({ ...form, tripName: event.target.value })}
+              />
+            </Field>
+            <Field label="Empresa">
+              <SelectInput
+                value={form.companyId}
+                onChange={(event) => setForm({ ...form, companyId: event.target.value })}
+              >
+                <option value="">Sin empresa</option>
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field label="Fecha">
+              <TextInput
+                required
+                type="date"
+                value={form.date}
+                onChange={(event) => setForm({ ...form, date: event.target.value })}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Kilometros">
+                <TextInput
+                  required
+                  min="0"
+                  step="0.1"
+                  type="number"
+                  value={form.kilometers || ""}
+                  onChange={(event) =>
+                    setForm({ ...form, kilometers: Number(event.target.value) || 0 })
+                  }
+                />
+              </Field>
+              <Field label="Precio por km">
+                <TextInput
+                  required
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  value={form.ratePerKm || ""}
+                  onChange={(event) =>
+                    setForm({ ...form, ratePerKm: Number(event.target.value) || 0 })
+                  }
+                />
+              </Field>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <p className="text-sm text-slate-500 dark:text-slate-400">Total del viaje</p>
+              <p className="text-3xl font-bold">{formatCurrency(currentCost)}</p>
+            </div>
+
+            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" icon={<Plus className="h-4 w-4" />}>
+                {editingId ? "Actualizar" : "Guardar"}
+              </Button>
+              {editingId ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setEditingId(null);
+                    setForm(emptyForm);
+                    setError("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+              ) : null}
+            </div>
+          </form>
+        </section>
+
+        <section className="grid gap-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+              <MapPin className="mb-3 h-5 w-5 text-ocean" />
+              <p className="text-sm text-slate-500">Kilometros</p>
+              <p className="text-3xl font-bold">{totals.kilometers.toFixed(1)} km</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-sm text-slate-500">Total</p>
+              <p className="text-3xl font-bold">{formatCurrency(totals.cost)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-sm text-slate-500">Viajes</p>
+              <p className="text-3xl font-bold">{trips.length}</p>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              icon={<Download className="h-4 w-4" />}
+              onClick={() => exportDistanceTripsToPDF(trips, companies)}
+              disabled={trips.length === 0}
+            >
+              Descargar PDF
+            </Button>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <table className="w-full min-w-[860px] text-left text-sm">
+              <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-800">
+                <tr>
+                  <th className="px-4 py-3">Fecha</th>
+                  <th className="px-4 py-3">Viaje</th>
+                  <th className="px-4 py-3">Empresa</th>
+                  <th className="px-4 py-3">Km</th>
+                  <th className="px-4 py-3">Precio/km</th>
+                  <th className="px-4 py-3">Total</th>
+                  <th className="px-4 py-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td className="px-4 py-6 text-slate-500" colSpan={7}>
+                      Cargando...
+                    </td>
+                  </tr>
+                ) : trips.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-slate-500" colSpan={7}>
+                      No hay viajes por distancia registrados.
+                    </td>
+                  </tr>
+                ) : (
+                  trips.map((trip) => (
+                    <tr key={trip.id} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="px-4 py-3">{trip.date}</td>
+                      <td className="px-4 py-3 font-semibold">{trip.tripName}</td>
+                      <td className="px-4 py-3">
+                        {trip.companyId ? companyName.get(trip.companyId) ?? "Empresa no encontrada" : "-"}
+                      </td>
+                      <td className="px-4 py-3">{trip.kilometers.toFixed(1)}</td>
+                      <td className="px-4 py-3">{formatCurrency(trip.ratePerKm)}</td>
+                      <td className="px-4 py-3 font-semibold">{formatCurrency(trip.cost)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            icon={<Pencil className="h-4 w-4" />}
+                            onClick={() => startEdit(trip)}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            icon={<Trash2 className="h-4 w-4" />}
+                            onClick={() => handleDelete(trip.id)}
+                          >
+                            Eliminar
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </ProtectedPage>
+  );
+}
