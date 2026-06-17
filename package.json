@@ -1,11 +1,15 @@
 {
   "name": "horas_react",
   "private": true,
+  "workspaces": [
+    "horasJSX"
+  ],
   "scripts": {
-    "dev": "npm --prefix horasJSX run dev",
-    "dv": "npm --prefix horasJSX run dev",
-    "build": "npm --prefix horasJSX run build",
-    "preview": "npm --prefix horasJSX run preview",
-    "lint": "npm --prefix horasJSX run lint"
+    "dev": "npm --workspace control-horas-saas run dev",
+    "dv": "npm --workspace control-horas-saas run dev",
+    "build": "npm --workspace control-horas-saas run build",
+    "preview": "npm --workspace control-horas-saas run preview",
+    "lint": "npm --workspace control-horas-saas run lint",
+    "typecheck": "npm --workspace control-horas-saas run typecheck"
   }
 }
