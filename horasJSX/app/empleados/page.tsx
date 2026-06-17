@@ -140,7 +140,37 @@ export default function EmployeesPage() {
           <div className="border-b border-slate-200 p-5 dark:border-slate-800">
             <h2 className="text-xl font-bold">Listado de empleados</h2>
           </div>
-          <div className="overflow-x-auto">
+          <div className="grid gap-3 p-4 md:hidden">
+            {loading ? (
+              <p className="text-sm text-slate-500">Cargando...</p>
+            ) : employees.length === 0 ? (
+              <p className="text-sm text-slate-500">No hay empleados registrados.</p>
+            ) : (
+              employees.map((employee) => (
+                <article key={employee.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{employee.firstName} {employee.lastName}</p>
+                      <p className="break-all text-xs text-slate-500">{employee.email}</p>
+                    </div>
+                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${employee.active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
+                      {employee.active ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
+                      {employee.active ? "Activo" : "Inactivo"}
+                    </span>
+                  </div>
+                  <dl className="mt-3 grid gap-1 text-sm text-slate-600 dark:text-slate-300">
+                    <div>Empresa: {employee.companyId ? companyName.get(employee.companyId) ?? "Empresa no encontrada" : "-"}</div>
+                    <div>Rol: {employee.role || "-"}</div>
+                  </dl>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(employee)}>Editar</Button>
+                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(employee.id)}>Baja</Button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                 <tr>

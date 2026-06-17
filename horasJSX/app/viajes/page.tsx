@@ -258,7 +258,55 @@ export default function DistanceTripsPage() {
             </Button>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid gap-3 md:hidden">
+            {loading ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                Cargando...
+              </div>
+            ) : trips.length === 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                No hay viajes por distancia registrados.
+              </div>
+            ) : (
+              trips.map((trip) => (
+                <article key={trip.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{trip.tripName}</p>
+                      <p className="text-sm text-slate-500">{trip.date}</p>
+                    </div>
+                    <p className="shrink-0 text-right font-semibold">{formatCurrency(trip.cost)}</p>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-slate-500">Km</dt>
+                      <dd className="font-semibold">{trip.kilometers.toFixed(1)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Precio/km</dt>
+                      <dd className="font-semibold">{formatCurrency(trip.ratePerKm)}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-slate-500">Empresa</dt>
+                      <dd className="break-words font-semibold">
+                        {trip.companyId ? companyName.get(trip.companyId) ?? "Empresa no encontrada" : "-"}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(trip)}>
+                      Editar
+                    </Button>
+                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(trip.id)}>
+                      Eliminar
+                    </Button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 md:block">
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-800">
                 <tr>

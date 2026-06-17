@@ -29,14 +29,14 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-950 px-4 py-10 text-white">
-      <section className="w-full max-w-md rounded-lg border border-white/10 bg-white p-6 text-slate-950 shadow-soft dark:bg-slate-900 dark:text-white">
-        <div className="mb-6 flex items-center gap-3">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-ocean text-white">
+    <main className="grid min-h-screen place-items-center overflow-hidden bg-slate-950 px-4 py-10 text-white">
+      <section className="w-[calc(100vw-2rem)] max-w-md rounded-lg border border-white/10 bg-white p-5 text-slate-950 shadow-soft dark:bg-slate-900 dark:text-white sm:p-6">
+        <div className="mb-6 flex min-w-0 items-center gap-3">
+          <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-ocean text-white">
             <Clock3 className="h-6 w-6" />
           </span>
-          <div>
-            <h1 className="text-2xl font-bold">Control de Horas</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold leading-tight sm:text-2xl">Control de Horas</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">Acceso seguro con Firebase Auth</p>
           </div>
         </div>

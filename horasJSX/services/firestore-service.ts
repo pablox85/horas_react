@@ -32,6 +32,7 @@ type TimestampedTenantEntity = TenantEntity & {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
+type FirestorePayload = Record<string, unknown>;
 
 const LOCAL_PREFIX = "control_horas_local";
 const isBrowser = typeof window !== "undefined";
@@ -88,6 +89,12 @@ function compareLocalValues(a: unknown, b: unknown): number {
 
 function getSortableValue(record: TenantEntity, field: string): unknown {
   return (record as Record<string, unknown>)[field];
+}
+
+function removeUndefinedFields<T extends FirestorePayload>(payload: T): FirestorePayload {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  );
 }
 
 function saveLocalEntity<T extends TimestampedTenantEntity, I extends object>(
@@ -204,12 +211,12 @@ export async function saveCompany(
 ): Promise<string> {
   const safeTenantId = ensureTenantId(tenantId);
   const now = Timestamp.now();
-  const payload = {
+  const payload = removeUndefinedFields({
     ...input,
     tenantId: safeTenantId,
     updatedAt: now,
     ...(id ? {} : { createdAt: now }),
-  };
+  });
 
   if (!db) {
     return saveLocalEntity<Company, UpsertCompanyInput>(
@@ -246,12 +253,12 @@ export async function saveEmployee(
 ): Promise<string> {
   const safeTenantId = ensureTenantId(tenantId);
   const now = Timestamp.now();
-  const payload = {
+  const payload = removeUndefinedFields({
     ...input,
     tenantId: safeTenantId,
     updatedAt: now,
     ...(id ? {} : { createdAt: now }),
-  };
+  });
 
   if (!db) {
     return saveLocalEntity<Employee, UpsertEmployeeInput>(
@@ -323,12 +330,12 @@ export async function saveHourRecord(
 ): Promise<string> {
   const safeTenantId = ensureTenantId(tenantId);
   const now = Timestamp.now();
-  const payload = {
+  const payload = removeUndefinedFields({
     ...input,
     tenantId: safeTenantId,
     updatedAt: now,
     ...(id ? {} : { createdAt: now }),
-  };
+  });
 
   if (!db) {
     return saveLocalEntity<HourRecord, UpsertHourRecordInput>(
@@ -365,12 +372,12 @@ export async function saveDistanceTrip(
 ): Promise<string> {
   const safeTenantId = ensureTenantId(tenantId);
   const now = Timestamp.now();
-  const payload = {
+  const payload = removeUndefinedFields({
     ...input,
     tenantId: safeTenantId,
     updatedAt: now,
     ...(id ? {} : { createdAt: now }),
-  };
+  });
 
   if (!db) {
     return saveLocalEntity<DistanceTrip, UpsertDistanceTripInput>(

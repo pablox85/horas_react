@@ -294,7 +294,41 @@ export default function HoursPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid gap-3 md:hidden">
+            {visibleRecords.length === 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                No hay registros para mostrar.
+              </div>
+            ) : (
+              visibleRecords.map((record) => (
+                <article key={record.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">
+                        {employeeName.get(record.employeeId) ?? "Empleado no encontrado"}
+                      </p>
+                      <p className="text-sm text-slate-500">{record.date}</p>
+                    </div>
+                    <p className="shrink-0 text-right font-semibold">{formatCurrency(record.cost)}</p>
+                  </div>
+                  <div className="mt-3 grid gap-1 text-sm text-slate-600 dark:text-slate-300">
+                    <span>{formatDisplayTime(record.hoursWorked)}</span>
+                    {record.notes ? <span className="break-words">{record.notes}</span> : null}
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(record)}>
+                      Editar
+                    </Button>
+                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(record.id)}>
+                      Eliminar
+                    </Button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 md:block">
             <table className="w-full min-w-[820px] text-left text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-800">
                 <tr>

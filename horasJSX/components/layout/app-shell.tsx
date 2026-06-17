@@ -79,9 +79,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6 md:py-8">
-        <div className="mb-5 flex flex-col gap-1 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
-          <span>{user?.email ?? "Sesion activa"}</span>
-          <span className="font-mono text-xs">tenantId: {tenantId ?? "cargando"}</span>
+        <div className="mb-5 flex min-w-0 flex-col gap-1 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
+          <span className="min-w-0 break-words">{user?.email ?? "Sesion activa"}</span>
+          <span className="min-w-0 break-all font-mono text-xs">tenantId: {tenantId ?? "cargando"}</span>
         </div>
         {children}
       </main>
