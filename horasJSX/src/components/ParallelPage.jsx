@@ -64,6 +64,39 @@ const parseCostFromDisplay = (text) => {
   return Number.isFinite(value) ? value : 0;
 };
 
+const normalizePDFDate = (value) =>
+  value
+    .split('/')
+    .map((p) => p.padStart(2, '0'))
+    .join('/');
+
+const parseEntryFromRowText = (rowText) => {
+  const dateMatch = rowText.match(DATE_IN_TEXT_REGEX)?.[0];
+  if (!dateMatch) return null;
+
+  const afterDate = rowText.slice(rowText.indexOf(dateMatch) + dateMatch.length).trim();
+  const timeMatch = afterDate.match(/(\d+(?:[.,]\d+)?\s*h(?:\s+\d+\s*m)?|\d+\s*m)/i);
+  if (!timeMatch) return null;
+
+  const tripText = afterDate.slice(0, timeMatch.index).trim();
+  if (!tripText || /^total\b/i.test(tripText)) return null;
+
+  const afterTime = afterDate.slice((timeMatch.index ?? 0) + timeMatch[0].length);
+  const costMatch = afterTime.match(/\$?\s*\d+(?:[.,]\d{2})?/);
+  const hours = parseHoursFromDisplay(timeMatch[0]);
+  if (hours <= 0) return null;
+
+  return {
+    date: normalizePDFDate(dateMatch),
+    tripType: tripText,
+    hours,
+    cost: parseCostFromDisplay(costMatch?.[0] ?? ''),
+  };
+};
+
+const HOURS_TEXT_REGEX = /^\d+(?:[.,]\d+)?\s*h(?:\s+\d+\s*m)?$|^\d+\s*m$/i;
+const COST_TEXT_REGEX = /^\$?\s*\d+(?:[.,]\d{2})?$/;
+
 const getDateItemsFromControlHorasPDF = async (pdfBytes) => {
   const loadingTask = getDocument({ data: pdfBytes });
   const pdf = await loadingTask.promise;
@@ -138,34 +171,51 @@ const extractEntriesFromControlHorasPDF = async (pdfBytes) => {
       if (cols.length === 0) return;
 
       const sortedCols = [...cols].sort((a, b) => a.x - b.x);
+      const rowText = sortedCols.map((c) => c.text).join(' ').replace(/\s+/g, ' ').trim();
 
       const dateCol = sortedCols.find((c) => DATE_REGEX.test(c.text));
-      if (!dateCol) return;
+      if (!dateCol) {
+        const parsedRow = parseEntryFromRowText(rowText);
+        if (!parsedRow) return;
 
-      const date = dateCol.text
-        .split('/')
-        .map((p) => p.padStart(2, '0'))
-        .join('/');
+        extracted.push({
+          id: `${pageNumber}-${rowY}-${parsedRow.date}-${parsedRow.tripType}`,
+          ...parsedRow,
+        });
+        return;
+      }
 
-      const tripText = sortedCols
-        .filter((c) => c.x >= 45 && c.x < 110)
-        .map((c) => c.text)
-        .join(' ')
-        .trim();
+      const date = normalizePDFDate(dateCol.text);
+      const dateIndex = sortedCols.findIndex((c) => c === dateCol);
+      const timeIndex = sortedCols.findIndex(
+        (c, index) => index > dateIndex && HOURS_TEXT_REGEX.test(c.text)
+      );
+      const costIndex = sortedCols.findIndex(
+        (c, index) => index > timeIndex && COST_TEXT_REGEX.test(c.text)
+      );
 
-      const timeText = sortedCols
-        .filter((c) => c.x >= 100 && c.x < 160)
-        .map((c) => c.text)
-        .join(' ')
-        .trim();
+      const tripText =
+        timeIndex > dateIndex
+          ? sortedCols
+              .slice(dateIndex + 1, timeIndex)
+              .map((c) => c.text)
+              .join(' ')
+              .trim()
+          : '';
 
-      const costText = sortedCols
-        .filter((c) => c.x >= 150)
-        .map((c) => c.text)
-        .join(' ')
-        .trim();
+      const timeText = timeIndex >= 0 ? sortedCols[timeIndex].text : '';
+      const costText = costIndex >= 0 ? sortedCols[costIndex].text : '';
 
-      if (!tripText || !timeText) return;
+      if (!tripText || !timeText) {
+        const parsedRow = parseEntryFromRowText(rowText);
+        if (!parsedRow) return;
+
+        extracted.push({
+          id: `${pageNumber}-${rowY}-${parsedRow.date}-${parsedRow.tripType}`,
+          ...parsedRow,
+        });
+        return;
+      }
       const hours = parseHoursFromDisplay(timeText);
       if (hours <= 0) return;
 
@@ -219,6 +269,8 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
     setDetectedRows(rows);
     if (rows.length > 0) {
       setLastUpdateMessage(`Filas detectadas para editar: ${rows.length}`);
+    } else {
+      setLastUpdateMessage('No pude detectar filas importables en este PDF.');
     }
   };
 
@@ -383,6 +435,7 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
         date: row.date,
         tripType: String(row.tripType || '').trim(),
         hours: Number(row.hours),
+        cost: Number(row.cost),
       }))
       .filter((row) => parseDate(row.date) && row.tripType && row.hours > 0);
 
@@ -403,21 +456,21 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
   }, [pdfUrl]);
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-4xl mx-auto">
       <div
-        className={`rounded-2xl p-8 mb-8 shadow-xl border transition-all duration-500 ${
+        className={`rounded-xl p-5 mb-5 shadow-xl border transition-all duration-500 ${
           darkMode
             ? 'bg-slate-800/50 border-slate-700/50 backdrop-blur-xl'
             : 'bg-white/80 border-slate-200 backdrop-blur-sm'
         }`}
       >
-        <div className="flex items-center justify-between mb-4 gap-3">
+        <div className="flex items-center justify-between mb-3 gap-3">
           <h1
-            className={`text-3xl font-bold ${
+            className={`text-2xl font-bold ${
               darkMode ? 'text-white' : 'text-slate-900'
             }`}
           >
-            Second Space
+            Importar PDF
           </h1>
           <button
             onClick={onBack}
@@ -432,21 +485,21 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
           </button>
         </div>
 
-        <p className={`${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-          Carga un PDF, previsualiza, ajusta fechas y pasa sus filas a la web app
-          para editar manualmente antes de importar.
+        <p className={`text-sm ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+          Carga un PDF de Control de Horas, revisa las filas detectadas y agregalas
+          al historial principal.
         </p>
 
         <div
-          className={`mt-6 rounded-xl border p-4 ${
+          className={`mt-4 rounded-lg border p-3 ${
             darkMode
               ? 'border-slate-700 bg-slate-900/40'
               : 'border-slate-200 bg-slate-50'
           }`}
         >
-          <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="flex flex-wrap items-center gap-2 mb-3">
             <label
-              className={`cursor-pointer py-2 px-4 rounded-lg font-semibold transition-all duration-300 flex items-center gap-2 ${
+              className={`cursor-pointer py-2 px-3 rounded-lg text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${
                 darkMode
                   ? 'bg-blue-600 hover:bg-blue-500 text-white'
                   : 'bg-slate-800 hover:bg-slate-700 text-white'
@@ -481,14 +534,14 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
               <>
                 <button
                   onClick={handleDownloadEditedPDF}
-                  className="py-2 px-3 rounded-lg font-semibold transition-all duration-300 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white"
+                  className="py-2 px-3 rounded-lg text-sm font-semibold transition-all duration-300 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white"
                 >
                   <Download className="w-4 h-4" />
                   Descargar PDF
                 </button>
                 <button
                   onClick={handleClearPDF}
-                  className={`py-2 px-3 rounded-lg font-semibold transition-all duration-300 flex items-center gap-2 ${
+                  className={`py-2 px-3 rounded-lg text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${
                     darkMode
                       ? 'bg-slate-700 hover:bg-slate-600 text-white'
                       : 'bg-slate-200 hover:bg-slate-300 text-slate-900'
@@ -503,13 +556,13 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
 
           {hasPDFLoaded && (
             <div
-              className={`rounded-lg border p-4 mb-4 ${
+              className={`rounded-lg border p-3 mb-3 ${
                 darkMode
                   ? 'border-slate-700 bg-slate-800/60'
                   : 'border-slate-200 bg-white'
               }`}
             >
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-2">
                 <CalendarRange
                   className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}
                 />
@@ -518,12 +571,12 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                 <input
                   type="date"
                   value={rangeStartISO}
                   onChange={(e) => setRangeStartISO(e.target.value)}
-                  className={`px-3 py-2 rounded-lg border ${
+                  className={`px-3 py-2 rounded-lg text-sm border ${
                     darkMode
                       ? 'bg-slate-700 border-slate-600 text-white'
                       : 'bg-white border-slate-300 text-slate-900'
@@ -533,7 +586,7 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
                   type="date"
                   value={rangeEndISO}
                   onChange={(e) => setRangeEndISO(e.target.value)}
-                  className={`px-3 py-2 rounded-lg border ${
+                  className={`px-3 py-2 rounded-lg text-sm border ${
                     darkMode
                       ? 'bg-slate-700 border-slate-600 text-white'
                       : 'bg-white border-slate-300 text-slate-900'
@@ -543,7 +596,7 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
                   type="date"
                   value={newStartISO}
                   onChange={(e) => setNewStartISO(e.target.value)}
-                  className={`px-3 py-2 rounded-lg border ${
+                  className={`px-3 py-2 rounded-lg text-sm border ${
                     darkMode
                       ? 'bg-slate-700 border-slate-600 text-white'
                       : 'bg-white border-slate-300 text-slate-900'
@@ -552,7 +605,7 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
                 <button
                   onClick={handleApplyDateRangeChange}
                   disabled={isProcessing}
-                  className={`py-2 px-3 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 ${
+                  className={`py-2 px-3 rounded-lg text-sm font-semibold transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 ${
                     darkMode
                       ? 'bg-blue-600 hover:bg-blue-500 text-white'
                       : 'bg-slate-800 hover:bg-slate-700 text-white'
@@ -565,87 +618,109 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
             </div>
           )}
 
-          {detectedRows.length > 0 && (
+          {hasPDFLoaded && (
             <div
-              className={`rounded-lg border p-4 mb-4 ${
+              className={`rounded-lg border p-3 mb-3 ${
                 darkMode
                   ? 'border-slate-700 bg-slate-800/60'
                   : 'border-slate-200 bg-white'
               }`}
             >
               <p className={`text-sm mb-3 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                Filas leidas del PDF. Puedes editarlas manualmente y luego importarlas.
+                {detectedRows.length > 0
+                  ? 'Filas leidas del PDF. Puedes editarlas manualmente y luego importarlas al historial principal.'
+                  : 'No hay filas detectadas para importar todavia. Si el PDF se ve bien, revisamos el formato de texto extraido.'}
               </p>
 
-              <div className="overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className={darkMode ? 'text-slate-300' : 'text-slate-700'}>
-                      <th className="text-left pb-2">Fecha</th>
-                      <th className="text-left pb-2">Tipo de viaje</th>
-                      <th className="text-left pb-2">Horas</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detectedRows.map((row) => (
-                      <tr key={row.id}>
-                        <td className="py-1 pr-2">
-                          <input
-                            type="text"
-                            value={row.date}
-                            onChange={(e) =>
-                              handleDetectedRowChange(row.id, 'date', e.target.value)
-                            }
-                            className={`w-full px-2 py-1 rounded border ${
-                              darkMode
-                                ? 'bg-slate-700 border-slate-600 text-white'
-                                : 'bg-white border-slate-300 text-slate-900'
-                            }`}
-                          />
-                        </td>
-                        <td className="py-1 pr-2">
-                          <input
-                            type="text"
-                            value={row.tripType}
-                            onChange={(e) =>
-                              handleDetectedRowChange(row.id, 'tripType', e.target.value)
-                            }
-                            className={`w-full px-2 py-1 rounded border ${
-                              darkMode
-                                ? 'bg-slate-700 border-slate-600 text-white'
-                                : 'bg-white border-slate-300 text-slate-900'
-                            }`}
-                          />
-                        </td>
-                        <td className="py-1">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.25"
-                            value={row.hours}
-                            onChange={(e) =>
-                              handleDetectedRowChange(row.id, 'hours', e.target.value)
-                            }
-                            className={`w-full px-2 py-1 rounded border ${
-                              darkMode
-                                ? 'bg-slate-700 border-slate-600 text-white'
-                                : 'bg-white border-slate-300 text-slate-900'
-                            }`}
-                          />
-                        </td>
+              {detectedRows.length > 0 && (
+                <div className="max-h-40 overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className={darkMode ? 'text-slate-300' : 'text-slate-700'}>
+                        <th className="text-left pb-2">Fecha</th>
+                        <th className="text-left pb-2">Tipo de viaje</th>
+                        <th className="text-left pb-2">Horas</th>
+                        <th className="text-left pb-2">Costo</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {detectedRows.map((row) => (
+                        <tr key={row.id}>
+                          <td className="py-1 pr-2">
+                            <input
+                              type="text"
+                              value={row.date}
+                              onChange={(e) =>
+                                handleDetectedRowChange(row.id, 'date', e.target.value)
+                              }
+                              className={`w-full px-2 py-1 rounded text-sm border ${
+                                darkMode
+                                  ? 'bg-slate-700 border-slate-600 text-white'
+                                  : 'bg-white border-slate-300 text-slate-900'
+                              }`}
+                            />
+                          </td>
+                          <td className="py-1 pr-2">
+                            <input
+                              type="text"
+                              value={row.tripType}
+                              onChange={(e) =>
+                                handleDetectedRowChange(row.id, 'tripType', e.target.value)
+                              }
+                              className={`w-full px-2 py-1 rounded text-sm border ${
+                                darkMode
+                                  ? 'bg-slate-700 border-slate-600 text-white'
+                                  : 'bg-white border-slate-300 text-slate-900'
+                              }`}
+                            />
+                          </td>
+                          <td className="py-1">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.25"
+                              value={row.hours}
+                              onChange={(e) =>
+                                handleDetectedRowChange(row.id, 'hours', e.target.value)
+                              }
+                              className={`w-full px-2 py-1 rounded text-sm border ${
+                                darkMode
+                                  ? 'bg-slate-700 border-slate-600 text-white'
+                                  : 'bg-white border-slate-300 text-slate-900'
+                              }`}
+                            />
+                          </td>
+                          <td className="py-1 pl-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={row.cost}
+                              onChange={(e) =>
+                                handleDetectedRowChange(row.id, 'cost', e.target.value)
+                              }
+                              className={`w-full px-2 py-1 rounded text-sm border ${
+                                darkMode
+                                  ? 'bg-slate-700 border-slate-600 text-white'
+                                  : 'bg-white border-slate-300 text-slate-900'
+                              }`}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div className="mt-3">
                 <button
                   onClick={handleImportToControl}
-                  className={`py-2 px-4 rounded-lg font-semibold transition-all duration-300 ${
+                  disabled={detectedRows.length === 0}
+                  className={`py-2 px-4 rounded-lg text-sm font-semibold transition-all duration-300 ${
                     darkMode
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                      : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:bg-slate-700 disabled:text-slate-400'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:bg-slate-200 disabled:text-slate-500'
                   }`}
                 >
                   Importar a Control de Horas
@@ -655,13 +730,13 @@ export function ParallelPage({ darkMode, onBack, onImportEntries }) {
           )}
 
           {lastUpdateMessage && (
-            <p className={`text-sm mb-3 ${darkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
+            <p className={`text-sm mb-2 ${darkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
               {lastUpdateMessage}
             </p>
           )}
 
           <div
-            className={`h-[72vh] rounded-lg overflow-hidden border ${
+            className={`h-[32vh] min-h-56 rounded-lg overflow-hidden border ${
               darkMode ? 'border-slate-700' : 'border-slate-200'
             }`}
           >

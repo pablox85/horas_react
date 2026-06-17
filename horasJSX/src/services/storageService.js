@@ -17,8 +17,10 @@ import {
 import { db, hasFirebaseConfig } from './firebase';
 
 const ENTRIES_COLLECTION = 'entries';
+const DISTANCE_ENTRIES_COLLECTION = 'distanceEntries';
 const TOTALS_DOC = 'totals/global';
 const LOCAL_ENTRIES_KEY = 'billing-entries';
+const LOCAL_DISTANCE_ENTRIES_KEY = 'distance-trip-entries';
 const LOCAL_TOTALS_KEY = 'billing-totals';
 
 const isBrowser = typeof window !== 'undefined';
@@ -62,6 +64,13 @@ const readLocalEntries = () => sortByCreatedAtDesc(readLocalJSON(LOCAL_ENTRIES_K
 
 const writeLocalEntries = (entries) => {
   writeLocalJSON(LOCAL_ENTRIES_KEY, sortByCreatedAtDesc(entries));
+};
+
+const readLocalDistanceEntries = () =>
+  sortByCreatedAtDesc(readLocalJSON(LOCAL_DISTANCE_ENTRIES_KEY, []));
+
+const writeLocalDistanceEntries = (entries) => {
+  writeLocalJSON(LOCAL_DISTANCE_ENTRIES_KEY, sortByCreatedAtDesc(entries));
 };
 
 /**
@@ -210,5 +219,91 @@ export const fetchTotals = async () => {
   } catch (error) {
     console.error('Error al cargar totales:', error);
     return readLocalJSON(LOCAL_TOTALS_KEY, null);
+  }
+};
+
+export const fetchDistanceEntries = async () => {
+  if (!hasFirebaseConfig || !db) {
+    return readLocalDistanceEntries();
+  }
+
+  try {
+    const q = query(
+      collection(db, DISTANCE_ENTRIES_COLLECTION),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      return {
+        id: data.id ?? docSnap.id,
+        ...data,
+      };
+    });
+  } catch (error) {
+    console.error('Error al cargar viajes por distancia:', error);
+    return readLocalDistanceEntries();
+  }
+};
+
+export const addDistanceEntry = async (entry) => {
+  if (!hasFirebaseConfig || !db) {
+    const currentEntries = readLocalDistanceEntries();
+    writeLocalDistanceEntries([
+      ...currentEntries.filter((item) => String(item.id) !== String(entry.id)),
+      entry,
+    ]);
+    return;
+  }
+
+  try {
+    await setDoc(doc(db, DISTANCE_ENTRIES_COLLECTION, String(entry.id)), entry);
+  } catch (error) {
+    console.error('Error al guardar viaje por distancia:', error);
+    const currentEntries = readLocalDistanceEntries();
+    writeLocalDistanceEntries([
+      ...currentEntries.filter((item) => String(item.id) !== String(entry.id)),
+      entry,
+    ]);
+    throw error;
+  }
+};
+
+export const deleteDistanceEntry = async (id) => {
+  if (!hasFirebaseConfig || !db) {
+    const currentEntries = readLocalDistanceEntries().filter(
+      (entry) => String(entry.id) !== String(id)
+    );
+    writeLocalDistanceEntries(currentEntries);
+    return;
+  }
+
+  try {
+    await deleteDoc(doc(db, DISTANCE_ENTRIES_COLLECTION, String(id)));
+  } catch (error) {
+    console.error('Error al eliminar viaje por distancia:', error);
+    const currentEntries = readLocalDistanceEntries().filter(
+      (entry) => String(entry.id) !== String(id)
+    );
+    writeLocalDistanceEntries(currentEntries);
+    throw error;
+  }
+};
+
+export const clearDistanceEntries = async () => {
+  if (!hasFirebaseConfig || !db) {
+    removeLocalKey(LOCAL_DISTANCE_ENTRIES_KEY);
+    return;
+  }
+
+  try {
+    const snapshot = await getDocs(collection(db, DISTANCE_ENTRIES_COLLECTION));
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+    await batch.commit();
+  } catch (error) {
+    console.error('Error al limpiar viajes por distancia:', error);
+    removeLocalKey(LOCAL_DISTANCE_ENTRIES_KEY);
+    throw error;
   }
 };

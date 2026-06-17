@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 
+const useFirebase = import.meta.env.VITE_USE_FIREBASE === 'true';
+
 // Validar variables de entorno
 const requiredEnvVars = [
   'VITE_FIREBASE_API_KEY',
@@ -19,6 +21,10 @@ if (missingVars.length > 0) {
   console.warn('Variables de entorno faltantes para Firebase:', missingVars);
 }
 
+if (!useFirebase) {
+  console.info('Firebase deshabilitado. Definí VITE_USE_FIREBASE=true para activarlo.');
+}
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -29,11 +35,13 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-console.log('🔥 Configuración de Firebase:', firebaseConfig);
+if (useFirebase) {
+  console.log('🔥 Configuración de Firebase:', firebaseConfig);
+}
 
 let app;
 let db = null;
-export const hasFirebaseConfig = missingVars.length === 0;
+export const hasFirebaseConfig = useFirebase && missingVars.length === 0;
 
 try {
   if (hasFirebaseConfig) {

@@ -7,6 +7,20 @@ import React, { useEffect, useRef } from 'react';
 import { FileText, Clock, Trash2, ArrowUpDown } from 'lucide-react';
 import { formatDisplayTime, formatCurrency } from '../utils/formatters';
 
+const getEntryDetail = (entry) => {
+  const type = entry.type || 'hours';
+
+  if (type === 'km') {
+    return `🛣️ ${entry.kilometers} km x ${formatCurrency(entry.ratePerKm)}/km`;
+  }
+
+  if (type === 'fixed') {
+    return '💵 Valor manual';
+  }
+
+  return `⏱️ ${formatDisplayTime(entry.hours || 0)}`;
+};
+
 export function EntriesList({
   entries,
   onDeleteEntry,
@@ -100,7 +114,7 @@ export function EntriesList({
                     <span
                       className={darkMode ? 'text-slate-400' : 'text-slate-600'}
                     >
-                      ⏱️ {formatDisplayTime(entry.hours)}
+                      {getEntryDetail(entry)}
                     </span>
                   </div>
                 </div>

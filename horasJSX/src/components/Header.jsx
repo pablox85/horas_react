@@ -4,9 +4,15 @@
  */
 
 import React from 'react';
-import { Clock, Sun, Moon, LayoutPanelTop } from 'lucide-react';
+import { Clock, Sun, Moon, LayoutPanelTop, MapPin } from 'lucide-react';
 
-export function Header({ darkMode, onToggleTheme, hourlyRate, onOpenParallel }) {
+export function Header({
+  darkMode,
+  onToggleTheme,
+  hourlyRate,
+  onOpenParallel,
+  onOpenDistanceTrips,
+}) {
   return (
     <div
       className={`rounded-2xl p-8 mb-8 shadow-xl border transition-all duration-500 ${
@@ -32,6 +38,17 @@ export function Header({ darkMode, onToggleTheme, hourlyRate, onOpenParallel }) 
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={onOpenDistanceTrips}
+            className={`px-4 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2 ${
+              darkMode
+                ? 'bg-slate-700 hover:bg-slate-600 text-white'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <MapPin className="w-5 h-5" />
+            Viajes por Distancia
+          </button>
+          <button
             onClick={onOpenParallel}
             className={`px-4 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2 ${
               darkMode
@@ -40,7 +57,7 @@ export function Header({ darkMode, onToggleTheme, hourlyRate, onOpenParallel }) 
             }`}
           >
             <LayoutPanelTop className="w-5 h-5" />
-            Second Space
+            Importar PDF
           </button>
           <button
             onClick={onToggleTheme}

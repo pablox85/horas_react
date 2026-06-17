@@ -27,8 +27,9 @@ export function ManualInput({
           </label>
           <input
             type="number"
-            value={hours}
+            value={hours === 0 ? '' : hours}
             onChange={(e) => onHoursChange(parseFloat(e.target.value) || 0)}
+            placeholder="0"
             min="0"
             step="0.25"
             className={`w-full px-4 py-3 rounded-xl border-2 transition-all duration-300 font-bold text-2xl text-center ${
@@ -48,8 +49,9 @@ export function ManualInput({
           </label>
           <input
             type="number"
-            value={minutes}
+            value={minutes === 0 ? '' : minutes}
             onChange={(e) => onMinutesChange(parseFloat(e.target.value) || 0)}
+            placeholder="0"
             min="0"
             max="59"
             className={`w-full px-4 py-3 rounded-xl border-2 transition-all duration-300 font-bold text-2xl text-center ${

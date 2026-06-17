@@ -4,7 +4,10 @@
  */
 
 import { useRef, useCallback } from 'react';
-import { calculateTotalHours, calculateCost } from '../services/calculationService';
+import {
+  calculateTotalHours,
+  calculateCost,
+} from '../services/calculationService';
 import { formatDateDisplay } from '../utils/formatters';
 
 /**
@@ -56,6 +59,15 @@ export const useTimeManager = () => {
       return null;
     }
 
+    const now = Date.now();
+    const baseEntry = {
+      id: now,
+      createdAt: now,
+      type: 'hours',
+      tripType: tripValue,
+      date: formatDateDisplay(date),
+    };
+
     // Cálculo de horas totales
     const totalHours = calculateTotalHours({
       mode,
@@ -73,18 +85,12 @@ export const useTimeManager = () => {
       return null;
     }
 
-    // Crear entrada
-    const now = Date.now();
-    const newEntry = {
-      id: now,
-      createdAt: now,
-      tripType: tripValue,
-      date: formatDateDisplay(date),
+    return {
+      ...baseEntry,
+      type: 'hours',
       hours: totalHours,
       cost: calculateCost(totalHours),
     };
-
-    return newEntry;
   }, [getTripTypeValue]);
 
   /**
@@ -93,7 +99,7 @@ export const useTimeManager = () => {
    */
   const getFormReset = useCallback(() => {
     return {
-      tripType: 'Rendición',
+      tripType: 'Territorio',
       customTrip: '',
       hours: 0,
       minutes: 0,

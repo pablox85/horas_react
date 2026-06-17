@@ -1,6 +1,20 @@
 import { formatDisplayTime, formatCurrency } from '../utils/formatters';
 import { getHourlyRate } from './calculationService';
 
+const getEntryDetail = (entry) => {
+  const type = entry.type || 'hours';
+
+  if (type === 'km') {
+    return `${entry.kilometers} km x ${formatCurrency(entry.ratePerKm)}/km`;
+  }
+
+  if (type === 'fixed') {
+    return 'Valor manual';
+  }
+
+  return formatDisplayTime(entry.hours || 0);
+};
+
 const createPDFDocument = (entries) => {
   if (entries.length === 0) {
     alert('No hay entradas para exportar');
@@ -21,7 +35,7 @@ const createPDFDocument = (entries) => {
 
   doc.setFontSize(20);
   doc.setTextColor(51, 65, 85);
-  doc.text('Viaticos - Laurence Larsen', 105, 20, { align: 'center' });
+  doc.text('Transporte - Laurence Larsen', 105, 20, { align: 'center' });
   doc.setFontSize(10);
   doc.text('Pablo Perez y Regina Aguilar Rut: 219599720011', 20, 38, { align: 'left' });
 
@@ -40,7 +54,7 @@ const createPDFDocument = (entries) => {
   doc.setFont(undefined, 'bold');
   doc.text('Fecha', 20, yPos);
   doc.text('Tipo de Viaje', 50, yPos);
-  doc.text('Tiempo', 110, yPos);
+  doc.text('Detalle', 110, yPos);
   doc.text('Costo', 160, yPos);
 
   yPos += HEADER_TO_FIRST_ROW_GAP;
@@ -48,11 +62,11 @@ const createPDFDocument = (entries) => {
   doc.line(20, headerSeparatorY, 190, headerSeparatorY);
   doc.setFont(undefined, 'normal');
 
-  const totalCost = entries.reduce((sum, entry) => sum + entry.cost, 0);
-  const totalHours = entries.reduce((sum, entry) => sum + entry.hours, 0);
+  const totalCost = entries.reduce((sum, entry) => sum + (Number(entry.cost) || 0), 0);
+  const totalHours = entries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
 
   entries.forEach((entry) => {
-    const timeDisplay = formatDisplayTime(entry.hours);
+    const detailDisplay = getEntryDetail(entry);
 
     if (yPos > 270) {
       doc.addPage();
@@ -61,7 +75,7 @@ const createPDFDocument = (entries) => {
 
     doc.text(entry.date, 20, yPos);
     doc.text(entry.tripType, 50, yPos);
-    doc.text(timeDisplay, 110, yPos);
+    doc.text(detailDisplay, 110, yPos);
     doc.text(formatCurrency(entry.cost), 160, yPos);
 
     yPos += ROW_HEIGHT;

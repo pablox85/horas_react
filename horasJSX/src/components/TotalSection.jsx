@@ -49,7 +49,7 @@ export function TotalSection({
           darkMode ? 'text-slate-400' : 'text-slate-600'
         }`}
       >
-        {formatDisplayTime(totalHours)} trabajadas
+        {formatDisplayTime(totalHours)} registradas por horas
       </p>
 
       <div className="grid grid-cols-2 gap-4">

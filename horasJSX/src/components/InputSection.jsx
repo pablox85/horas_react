@@ -56,9 +56,8 @@ export function InputSection({
                 : 'bg-white border-slate-300 text-slate-900 focus:border-slate-500 focus:ring-2 focus:ring-slate-200'
             }`}
           >
-            <option value="Rendición">Rendición</option>
-            <option value="Visita">Visita</option>
             <option value="Territorio">Territorio</option>
+            <option value="Visita">Visita</option>
             <option value="custom">Otro (personalizado)</option>
           </select>
         </div>
@@ -90,7 +89,7 @@ export function InputSection({
         {/* Date */}
         <div>
           <label
-            className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${
+            className={`text-sm font-semibold mb-2 flex items-center gap-2 ${
               darkMode ? 'text-slate-300' : 'text-slate-700'
             }`}
           >

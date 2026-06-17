@@ -33,6 +33,14 @@ export const calculateCost = (hours) => {
   return hours * HOURLY_RATE;
 };
 
+export const calculateKmCost = (kilometers, ratePerKm) => {
+  return kilometers * ratePerKm;
+};
+
+export const calculateFixedCost = (amount) => {
+  return amount;
+};
+
 /**
  * Calcula los totales de un array de entradas
  * @param {Array} entries - Array de entradas
@@ -40,8 +48,8 @@ export const calculateCost = (hours) => {
  */
 export const calculateTotals = (entries) => {
   return {
-    totalCost: entries.reduce((sum, entry) => sum + entry.cost, 0),
-    totalHours: entries.reduce((sum, entry) => sum + entry.hours, 0),
+    totalCost: entries.reduce((sum, entry) => sum + (Number(entry.cost) || 0), 0),
+    totalHours: entries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0),
   };
 };
 

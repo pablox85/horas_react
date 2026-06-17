@@ -11,6 +11,7 @@ import { EntriesList } from './components/EntriesList';
 import { TotalSection } from './components/TotalSection';
 import { NotificationSuccess } from './components/NotificationSuccess';
 import { ParallelPage } from './components/ParallelPage';
+import { DistanceTripsPage } from './components/DistanceTripsPage';
 import { useTimeManager } from './hooks/useTimeManager';
 import {
   fetchEntries,
@@ -42,7 +43,7 @@ const parseEntryDateToTimestamp = (entryDate) => {
 
 export default function ControlHoras() {
   const [entries, setEntries] = useState([]);
-  const [tripType, setTripType] = useState('Rendición');
+  const [tripType, setTripType] = useState('Territorio');
   const [customTrip, setCustomTrip] = useState('');
   const [date, setDate] = useState('');
   const [mode, setMode] = useState('manual');
@@ -305,14 +306,18 @@ export default function ControlHoras() {
     const baseNow = Date.now();
     const imported = rows.map((row, index) => {
       const hoursValue = Number(row.hours) || 0;
+      const pdfCost = Number(row.cost);
       const createdAt = baseNow + index;
       return {
         id: createdAt,
         createdAt,
+        type: 'hours',
         tripType: row.tripType,
         date: row.date,
         hours: hoursValue,
-        cost: calculateCost(hoursValue),
+        cost: Number.isFinite(pdfCost) && pdfCost > 0
+          ? pdfCost
+          : calculateCost(hoursValue),
       };
     });
 
@@ -356,6 +361,7 @@ export default function ControlHoras() {
             darkMode={darkMode}
             onToggleTheme={() => setDarkMode(!darkMode)}
             onOpenParallel={() => setCurrentView('parallel')}
+            onOpenDistanceTrips={() => setCurrentView('distance')}
             hourlyRate={hourlyRate}
           />
 
@@ -399,11 +405,16 @@ export default function ControlHoras() {
             darkMode={darkMode}
           />
         </div>
-      ) : (
+      ) : currentView === 'parallel' ? (
         <ParallelPage
           darkMode={darkMode}
           onBack={() => setCurrentView('control')}
           onImportEntries={handleImportEntriesFromPDF}
+        />
+      ) : (
+        <DistanceTripsPage
+          darkMode={darkMode}
+          onBack={() => setCurrentView('control')}
         />
       )}
 
