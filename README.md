@@ -1,40 +1,33 @@
-# horas_react
+# Control de Viajes
 
-Proyecto principal de la aplicación de control de horas.
+Aplicacion Next.js para gestionar empresas, empleados, horas trabajadas y viajes por distancia con Firebase Auth, Firestore y despliegue en Vercel.
 
-## Arranque rápido
-
-Desde la raíz del repositorio:
+## Arranque rapido
 
 ```bash
 npm install
 npm run dev
 ```
 
-Si preferís usar el script alternativo:
+La aplicacion vive en `horasJSX/`, pero los scripts de la raiz usan npm workspaces.
 
-```bash
-npm run dv
-```
-
-## Estructura
-
-- `horasJSX/`: aplicación Vite + React
-- `horasJSX/src/`: código fuente principal
-- `horasJSX/package.json`: scripts reales del proyecto
-
-## Scripts disponibles
-
-Desde la raíz:
+## Scripts
 
 - `npm run dev`
-- `npm run dv`
 - `npm run build`
 - `npm run preview`
 - `npm run lint`
+- `npm run typecheck`
 
-## Notas
+## Estructura vigente
 
-- La app funciona con almacenamiento local por defecto.
-- Si configurás Firebase con variables `VITE_FIREBASE_*`, la persistencia puede usar Firestore.
-- La documentación técnica completa está en [`horasJSX/README.md`](/home/pablo/Escritorio/horas_react/horasJSX/README.md).
+- `horasJSX/app/`: rutas Next.js App Router.
+- `horasJSX/components/`: componentes compartidos.
+- `horasJSX/hooks/`: hooks de auth, tema y perfil.
+- `horasJSX/lib/`: Firebase, tenant y formatters.
+- `horasJSX/services/`: Firestore, calculos y PDF.
+- `horasJSX/types/`: modelos TypeScript.
+
+## Configuracion
+
+Usar variables `NEXT_PUBLIC_FIREBASE_*` en `horasJSX/.env.local` para desarrollo local y en Vercel para produccion.

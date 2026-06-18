@@ -45,9 +45,13 @@ export default function LoginPage() {
         <form className="grid gap-4" onSubmit={handleSubmit}>
           <Field label="Email">
             <TextInput
+              autoCapitalize="none"
               autoComplete="email"
+              autoCorrect="off"
               inputMode="email"
+              name="email"
               required
+              spellCheck={false}
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -56,9 +60,13 @@ export default function LoginPage() {
           <Field label="Password">
             <div className="relative">
               <TextInput
+                autoCapitalize="none"
                 autoComplete="current-password"
+                autoCorrect="off"
                 className="pr-12"
+                name="password"
                 required
+                spellCheck={false}
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

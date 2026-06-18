@@ -3,15 +3,7 @@ import nextTs from "eslint-config-next/typescript";
 
 const eslintConfig = [
   {
-    ignores: [
-      ".next/**",
-      "node_modules/**",
-      "dist/**",
-      "src/**",
-      "control-horas.jsx",
-      "vite.config.js",
-      "tailwind.config.js",
-    ],
+    ignores: [".next/**", "node_modules/**"],
   },
   ...nextVitals,
   ...nextTs,

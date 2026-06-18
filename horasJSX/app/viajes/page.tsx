@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextInput } from "@/components/ui/field";
 import { formatCurrency, formatISODate } from "@/lib/formatters";
 import { useAuth } from "@/hooks/use-auth";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import { calculateKmCost } from "@/services/calculation-service";
 import {
   deleteDistanceTrip,
@@ -35,6 +36,7 @@ const emptyForm: TripForm = {
 
 export default function DistanceTripsPage() {
   const { tenantId } = useAuth();
+  const { pdfIssuer } = useUserProfile();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [trips, setTrips] = useState<DistanceTrip[]>([]);
   const [form, setForm] = useState<TripForm>(emptyForm);
@@ -251,7 +253,7 @@ export default function DistanceTripsPage() {
               type="button"
               variant="secondary"
               icon={<Download className="h-4 w-4" />}
-              onClick={() => exportDistanceTripsToPDF(trips, companies)}
+              onClick={() => exportDistanceTripsToPDF(trips, companies, pdfIssuer)}
               disabled={trips.length === 0}
             >
               Descargar PDF

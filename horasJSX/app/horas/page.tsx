@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextareaInput, TextInput } from "@/components/ui/field";
 import { formatCurrency, formatDisplayTime, formatISODate, formatTime } from "@/lib/formatters";
 import { useAuth } from "@/hooks/use-auth";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import { calculateCost, calculateTotalHours, DEFAULT_HOURLY_RATE } from "@/services/calculation-service";
 import {
   deleteHourRecord,
@@ -42,6 +43,7 @@ const emptyForm: HourForm = {
 
 export default function HoursPage() {
   const { tenantId } = useAuth();
+  const { pdfIssuer } = useUserProfile();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [records, setRecords] = useState<HourRecord[]>([]);
@@ -51,6 +53,7 @@ export default function HoursPage() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [employeeFilter, setEmployeeFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const [fromFilter, setFromFilter] = useState("");
   const [toFilter, setToFilter] = useState("");
   const [error, setError] = useState("");
@@ -65,15 +68,20 @@ export default function HoursPage() {
     () => new Map(companies.map((company) => [company.id, company])),
     [companies],
   );
+  const companyName = useMemo(
+    () => new Map(companies.map((company) => [company.id, company.name])),
+    [companies],
+  );
   const visibleRecords = useMemo(
     () =>
       records.filter((record) => {
         if (employeeFilter && record.employeeId !== employeeFilter) return false;
+        if (companyFilter && record.companyId !== companyFilter) return false;
         if (fromFilter && record.date < fromFilter) return false;
         if (toFilter && record.date > toFilter) return false;
         return true;
       }),
-    [records, employeeFilter, fromFilter, toFilter],
+    [records, employeeFilter, companyFilter, fromFilter, toFilter],
   );
   const totals = useMemo(
     () =>
@@ -281,14 +289,18 @@ export default function HoursPage() {
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_auto]">
+            <div className="grid gap-3 md:grid-cols-[1fr_1fr_160px_160px_auto]">
               <SelectInput value={employeeFilter} onChange={(event) => setEmployeeFilter(event.target.value)}>
-                <option value="">Todos los empleados</option>
+                <option value="">Empleados</option>
                 {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.firstName} {employee.lastName}</option>)}
+              </SelectInput>
+              <SelectInput value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)}>
+                <option value="">Empresas</option>
+                {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
               </SelectInput>
               <TextInput type="date" value={fromFilter} onChange={(event) => setFromFilter(event.target.value)} />
               <TextInput type="date" value={toFilter} onChange={(event) => setToFilter(event.target.value)} />
-              <Button type="button" variant="secondary" icon={<Download className="h-4 w-4" />} onClick={() => exportHoursToPDF(visibleRecords, employees)}>
+              <Button type="button" variant="secondary" icon={<Download className="h-4 w-4" />} onClick={() => exportHoursToPDF(visibleRecords, companies, companyFilter, pdfIssuer)}>
                 Descargar PDF
               </Button>
             </div>
@@ -312,6 +324,9 @@ export default function HoursPage() {
                     <p className="shrink-0 text-right font-semibold">{formatCurrency(record.cost)}</p>
                   </div>
                   <div className="mt-3 grid gap-1 text-sm text-slate-600 dark:text-slate-300">
+                    <span>
+                      Empresa: {record.companyId ? companyName.get(record.companyId) ?? "Empresa no encontrada" : "-"}
+                    </span>
                     <span>{formatDisplayTime(record.hoursWorked)}</span>
                     {record.notes ? <span className="break-words">{record.notes}</span> : null}
                   </div>
@@ -334,6 +349,7 @@ export default function HoursPage() {
                 <tr>
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">Empleado</th>
+                  <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Horas</th>
                   <th className="px-4 py-3">Costo</th>
                   <th className="px-4 py-3">Notas</th>
@@ -342,11 +358,14 @@ export default function HoursPage() {
               </thead>
               <tbody>
                 {visibleRecords.length === 0 ? (
-                  <tr><td className="px-4 py-6 text-slate-500" colSpan={6}>No hay registros para mostrar.</td></tr>
+                  <tr><td className="px-4 py-6 text-slate-500" colSpan={7}>No hay registros para mostrar.</td></tr>
                 ) : visibleRecords.map((record) => (
                   <tr key={record.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-4 py-3">{record.date}</td>
                     <td className="px-4 py-3">{employeeName.get(record.employeeId) ?? "Empleado no encontrado"}</td>
+                    <td className="px-4 py-3">
+                      {record.companyId ? companyName.get(record.companyId) ?? "Empresa no encontrada" : "-"}
+                    </td>
                     <td className="px-4 py-3">{formatDisplayTime(record.hoursWorked)}</td>
                     <td className="px-4 py-3 font-semibold">{formatCurrency(record.cost)}</td>
                     <td className="max-w-[260px] truncate px-4 py-3">{record.notes || "-"}</td>

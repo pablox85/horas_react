@@ -16,11 +16,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
+import { useUserProfile } from "@/hooks/use-user-profile";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/horas", label: "Horas", icon: Clock3 },
-  { href: "/viajes", label: "Viajes", icon: MapPin },
+  { href: "/horas", label: "Viaje por hora", icon: Clock3 },
+  { href: "/viajes", label: "Viaje por Km", icon: MapPin },
   { href: "/empleados", label: "Empleados", icon: Users },
   { href: "/empresas", label: "Empresas", icon: Building2 },
   { href: "/configuracion", label: "Configuracion", icon: Settings },
@@ -28,8 +29,9 @@ const navItems = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, tenantId, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { darkMode, toggleTheme } = useTheme();
+  const { displayName } = useUserProfile();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
@@ -37,10 +39,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-ocean">
-              Control de Horas
+              Bpr soluciones
             </p>
             <h1 className="text-lg font-bold text-slate-950 dark:text-white">
-              Operacion multi-tenant
+              Control de Viajes
             </h1>
           </div>
           <nav className="flex gap-1 overflow-x-auto pb-1 md:pb-0">
@@ -81,7 +83,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto max-w-7xl px-4 py-6 md:py-8">
         <div className="mb-5 flex min-w-0 flex-col gap-1 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
           <span className="min-w-0 break-words">{user?.email ?? "Sesion activa"}</span>
-          <span className="min-w-0 break-all font-mono text-xs">tenantId: {tenantId ?? "cargando"}</span>
+          <span className="min-w-0 break-words font-medium">{displayName}</span>
         </div>
         {children}
       </main>

@@ -2,21 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Clock3, MapPin, Plus, TrendingUp, Users } from "lucide-react";
+import { Building2, Clock3, Download, MapPin, Plus, Sigma, TrendingUp, Users } from "lucide-react";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDisplayTime } from "@/lib/formatters";
 import { useAuth } from "@/hooks/use-auth";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   listCompanies,
   listDistanceTrips,
   listEmployees,
   listHourRecords,
 } from "@/services/firestore-service";
+import { exportTotalTripsToPDF } from "@/services/pdf-service";
 import type { Company, DistanceTrip, Employee, HourRecord } from "@/types/models";
 
 export default function DashboardPage() {
   const { tenantId } = useAuth();
+  const { pdfIssuer } = useUserProfile();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [records, setRecords] = useState<HourRecord[]>([]);
@@ -56,7 +59,12 @@ export default function DashboardPage() {
   );
 
   const activeEmployees = employees.filter((employee) => employee.active).length;
+  const companyName = useMemo(
+    () => new Map(companies.map((company) => [company.id, company.name])),
+    [companies],
+  );
   const distanceTotal = trips.reduce((sum, trip) => sum + trip.cost, 0);
+  const grandTotal = summary.cost + distanceTotal;
   const latestRecords = records.slice(0, 6);
 
   return (
@@ -75,15 +83,33 @@ export default function DashboardPage() {
               Registrar viaje
             </Button>
           </Link>
+          <Button
+            type="button"
+            variant="secondary"
+            icon={<Download className="h-4 w-4" />}
+            onClick={() =>
+              exportTotalTripsToPDF({
+                records,
+                trips,
+                employees,
+                companies,
+                issuer: pdfIssuer,
+              })
+            }
+            disabled={records.length === 0 && trips.length === 0}
+          >
+            Exportar PDF
+          </Button>
         </div>
       </div>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <Metric icon={<Clock3 className="h-5 w-5" />} label="Horas registradas" value={formatDisplayTime(summary.hours)} />
-        <Metric href="/horas" icon={<TrendingUp className="h-5 w-5" />} label="Total facturado" value={formatCurrency(summary.cost)} />
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <Metric icon={<Sigma className="h-5 w-5" />} label="Total" value={formatCurrency(grandTotal)} />
+        <Metric href="/horas" icon={<Clock3 className="h-5 w-5" />} label="Viajes por hora" value={formatCurrency(summary.cost)} />
         <Metric href="/viajes" icon={<MapPin className="h-5 w-5" />} label="Viajes por distancia" value={formatCurrency(distanceTotal)} />
-        <Metric icon={<Users className="h-5 w-5" />} label="Empleados activos" value={String(activeEmployees)} />
-        <Metric icon={<Building2 className="h-5 w-5" />} label="Empresas" value={String(companies.length)} />
+        <Metric icon={<TrendingUp className="h-5 w-5" />} label="Horas registradas" value={formatDisplayTime(summary.hours)} />
+        <Metric href="/empleados" icon={<Users className="h-5 w-5" />} label="Empleados activos" value={String(activeEmployees)} />
+        <Metric href="/empresas" icon={<Building2 className="h-5 w-5" />} label="Empresas" value={String(companies.length)} />
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -112,6 +138,9 @@ export default function DashboardPage() {
                   <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                     {formatDisplayTime(record.hoursWorked)}
                   </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Empresa: {record.companyId ? companyName.get(record.companyId) ?? "Empresa no encontrada" : "-"}
+                  </p>
                 </article>
               );
             })
@@ -123,21 +152,25 @@ export default function DashboardPage() {
               <tr>
                 <th className="px-4 py-3">Fecha</th>
                 <th className="px-4 py-3">Empleado</th>
+                <th className="px-4 py-3">Empresa</th>
                 <th className="px-4 py-3">Horas</th>
                 <th className="px-4 py-3">Costo</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td className="px-4 py-6 text-slate-500" colSpan={4}>Cargando...</td></tr>
+                <tr><td className="px-4 py-6 text-slate-500" colSpan={5}>Cargando...</td></tr>
               ) : latestRecords.length === 0 ? (
-                <tr><td className="px-4 py-6 text-slate-500" colSpan={4}>Todavia no hay registros.</td></tr>
+                <tr><td className="px-4 py-6 text-slate-500" colSpan={5}>Todavia no hay registros.</td></tr>
               ) : latestRecords.map((record) => {
                 const employee = employees.find((item) => item.id === record.employeeId);
                 return (
                   <tr key={record.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-4 py-3">{record.date}</td>
                     <td className="px-4 py-3">{employee ? `${employee.firstName} ${employee.lastName}` : "Empleado no encontrado"}</td>
+                    <td className="px-4 py-3">
+                      {record.companyId ? companyName.get(record.companyId) ?? "Empresa no encontrada" : "-"}
+                    </td>
                     <td className="px-4 py-3">{formatDisplayTime(record.hoursWorked)}</td>
                     <td className="px-4 py-3 font-semibold">{formatCurrency(record.cost)}</td>
                   </tr>
