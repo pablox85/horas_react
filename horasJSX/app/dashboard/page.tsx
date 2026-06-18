@@ -6,6 +6,7 @@ import { Building2, Clock3, Download, MapPin, Plus, Sigma, TrendingUp, Users } f
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDisplayTime } from "@/lib/formatters";
+import { measureAsync, measureSync } from "@/lib/performance";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
@@ -25,22 +26,28 @@ export default function DashboardPage() {
   const [records, setRecords] = useState<HourRecord[]>([]);
   const [trips, setTrips] = useState<DistanceTrip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     async function load() {
       if (!tenantId) return;
       setLoading(true);
-      const [nextEmployees, nextCompanies, nextRecords, nextTrips] = await Promise.all([
-        listEmployees(tenantId),
-        listCompanies(tenantId),
-        listHourRecords(tenantId),
-        listDistanceTrips(tenantId),
-      ]);
-      setEmployees(nextEmployees);
-      setCompanies(nextCompanies);
-      setRecords(nextRecords);
-      setTrips(nextTrips);
-      setLoading(false);
+      try {
+        await measureAsync("dashboard.load.total", async () => {
+          const [nextEmployees, nextCompanies, nextRecords, nextTrips] = await Promise.all([
+            listEmployees(tenantId),
+            listCompanies(tenantId),
+            listHourRecords(tenantId),
+            listDistanceTrips(tenantId),
+          ]);
+          setEmployees(nextEmployees);
+          setCompanies(nextCompanies);
+          setRecords(nextRecords);
+          setTrips(nextTrips);
+        });
+      } finally {
+        setLoading(false);
+      }
     }
 
     void load();
@@ -67,6 +74,24 @@ export default function DashboardPage() {
   const grandTotal = summary.cost + distanceTotal;
   const latestRecords = records.slice(0, 6);
 
+  function handleExportPdf() {
+    setExportingPdf(true);
+    try {
+      measureSync("pdf.totalTrips.export", () =>
+        exportTotalTripsToPDF({
+          records,
+          trips,
+          employees,
+          companies,
+          issuer: pdfIssuer,
+        }),
+        { rows: records.length + trips.length },
+      );
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   return (
     <ProtectedPage>
       <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -87,18 +112,10 @@ export default function DashboardPage() {
             type="button"
             variant="secondary"
             icon={<Download className="h-4 w-4" />}
-            onClick={() =>
-              exportTotalTripsToPDF({
-                records,
-                trips,
-                employees,
-                companies,
-                issuer: pdfIssuer,
-              })
-            }
-            disabled={records.length === 0 && trips.length === 0}
+            onClick={handleExportPdf}
+            disabled={exportingPdf || (records.length === 0 && trips.length === 0)}
           >
-            Exportar PDF
+            {exportingPdf ? "Generando..." : "Exportar PDF"}
           </Button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput } from "@/components/ui/field";
 import { formatCurrency } from "@/lib/formatters";
+import { measureAsync } from "@/lib/performance";
 import { useAuth } from "@/hooks/use-auth";
 import { deleteCompany, listCompanies, saveCompany } from "@/services/firestore-service";
 import type { Company, UpsertCompanyInput } from "@/types/models";
@@ -26,6 +27,8 @@ export default function CompaniesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!tenantId) return;
@@ -53,33 +56,49 @@ export default function CompaniesPage() {
     setError("");
 
     try {
-      await saveCompany(
-        tenantId,
-        {
-          ...form,
-          name: form.name.trim(),
-          rut: form.rut?.trim() || "",
-          address: form.address?.trim() || "",
-          contactEmail: form.contactEmail?.trim() || "",
-          hourlyRate: Number(form.hourlyRate) || 0,
+      setSubmitting(true);
+      await measureAsync(
+        "companies.save.total",
+        async () => {
+          await measureAsync("companies.save.write", () =>
+            saveCompany(
+              tenantId,
+              {
+                ...form,
+                name: form.name.trim(),
+                rut: form.rut?.trim() || "",
+                address: form.address?.trim() || "",
+                contactEmail: form.contactEmail?.trim() || "",
+                hourlyRate: Number(form.hourlyRate) || 0,
+              },
+              editingId ?? undefined,
+            ),
+          );
+          setForm(emptyForm);
+          setEditingId(null);
+          await measureAsync("companies.refresh.afterSave", refresh);
         },
-        editingId ?? undefined,
+        { mode: editingId ? "edit" : "create" },
       );
-      setForm(emptyForm);
-      setEditingId(null);
-      await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar la empresa.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function handleDelete(id: string) {
     if (!tenantId || !window.confirm("Eliminar empresa?")) return;
+    setDeletingId(id);
     try {
-      await deleteCompany(id, tenantId);
-      await refresh();
+      await measureAsync("companies.delete.total", async () => {
+        await measureAsync("companies.delete.write", () => deleteCompany(id, tenantId));
+        await measureAsync("companies.refresh.afterDelete", refresh);
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo eliminar la empresa.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -117,7 +136,9 @@ export default function CompaniesPage() {
             </Field>
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
             <div className="flex gap-2">
-              <Button type="submit" icon={<Plus className="h-4 w-4" />}>{editingId ? "Actualizar" : "Crear"}</Button>
+              <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>
+                {submitting ? "Guardando..." : editingId ? "Actualizar" : "Crear"}
+              </Button>
               {editingId ? (
                 <Button type="button" variant="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>Cancelar</Button>
               ) : null}
@@ -153,7 +174,9 @@ export default function CompaniesPage() {
                     Ver
                   </Link>
                   <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(company)}>Editar</Button>
-                  <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(company.id)}>Eliminar</Button>
+                  <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(company.id)} disabled={deletingId === company.id}>
+                    {deletingId === company.id ? "Eliminando..." : "Eliminar"}
+                  </Button>
                 </div>
               </div>
             </article>

@@ -7,12 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Field, TextInput } from "@/components/ui/field";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import { measureSync } from "@/lib/performance";
 
 export default function SettingsPage() {
   const { user } = useAuth();
   const { profile, saveProfile } = useUserProfile();
   const [profileForm, setProfileForm] = useState(profile);
   const [saved, setSaved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setProfileForm(profile);
@@ -20,9 +22,14 @@ export default function SettingsPage() {
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    saveProfile(profileForm);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+    setSubmitting(true);
+    try {
+      measureSync("settings.save.local.total", () => saveProfile(profileForm));
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1800);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function updateProfileField(field: keyof typeof profileForm, value: string) {
@@ -36,18 +43,20 @@ export default function SettingsPage() {
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-4 flex items-center gap-3">
             <ShieldCheck className="h-6 w-6 text-ocean" />
-            <h2 className="text-2xl font-bold">Configuracion SaaS</h2>
+            <h2 className="text-2xl font-bold">Configuracion de empresa</h2>
           </div>
-          <div className="grid gap-4 text-sm text-slate-600 dark:text-slate-300">
+          <div className="grid gap-4  text-l text-slate-600 dark:text-slate-300">
             <p>
-              La aplicacion usa Firebase Authentication para iniciar sesion y Cloud Firestore
-              para datos operativos. Todas las colecciones principales guardan y consultan con
-              <span className="font-mono"> tenantId</span>.
+              La aplicación permite que varias empresas usen el mismo sistema de forma segura. 
+              Cada empresa ve únicamente su propia información, sin acceso a los datos de otras empresas.
+              Usando un <span className="font-mono">tenantId</span> unico.
             </p>
             <p>
-              Para tenants productivos, asigna el claim <span className="font-mono">tenantId</span>
-              al usuario desde un proceso administrativo seguro. Si el claim no existe, la app usa
-              un tenant derivado del UID para aislar la informacion.
+              El acceso se realiza mediante usuario y contraseña, y toda la información queda 
+              asociada automáticamente a la empresa correspondiente.
+            </p>
+            <p>Si una empresa aún no tiene una configuración específica asignada, 
+              el sistema crea un espacio privado e independiente para mantener sus datos aislados y protegidos.
             </p>
           </div>
         </section>
@@ -80,7 +89,9 @@ export default function SettingsPage() {
               />
             </Field>
             <div className="flex items-center gap-3">
-              <Button type="submit">Guardar</Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Guardando..." : "Guardar"}
+              </Button>
               {saved ? <span className="text-sm text-emerald-600">Guardado</span> : null}
             </div>
           </form>

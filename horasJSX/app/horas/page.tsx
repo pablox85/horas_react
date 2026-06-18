@@ -6,6 +6,7 @@ import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextareaInput, TextInput } from "@/components/ui/field";
 import { formatCurrency, formatDisplayTime, formatISODate, formatTime } from "@/lib/formatters";
+import { measureAsync, measureSync } from "@/lib/performance";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import { calculateCost, calculateTotalHours, DEFAULT_HOURLY_RATE } from "@/services/calculation-service";
@@ -57,6 +58,9 @@ export default function HoursPage() {
   const [fromFilter, setFromFilter] = useState("");
   const [toFilter, setToFilter] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const timerStartRef = useRef<number | null>(null);
 
   const activeEmployees = employees.filter((employee) => employee.active);
@@ -176,14 +180,25 @@ export default function HoursPage() {
     };
 
     try {
-      await saveHourRecord(tenantId, input, editingId ?? undefined);
-      setForm(emptyForm);
-      setEditingId(null);
-      setTimerSeconds(0);
-      stopTimer();
-      await refresh();
+      setSubmitting(true);
+      await measureAsync(
+        "hours.save.total",
+        async () => {
+          await measureAsync("hours.save.write", () =>
+            saveHourRecord(tenantId, input, editingId ?? undefined),
+          );
+          setForm(emptyForm);
+          setEditingId(null);
+          setTimerSeconds(0);
+          stopTimer();
+          await measureAsync("hours.refresh.afterSave", refresh);
+        },
+        { mode: editingId ? "edit" : "create" },
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar el registro.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -204,8 +219,27 @@ export default function HoursPage() {
 
   async function handleDelete(id: string) {
     if (!tenantId || !window.confirm("Eliminar registro de horas?")) return;
-    await deleteHourRecord(id, tenantId);
-    await refresh();
+    setDeletingId(id);
+    try {
+      await measureAsync("hours.delete.total", async () => {
+        await measureAsync("hours.delete.write", () => deleteHourRecord(id, tenantId));
+        await measureAsync("hours.refresh.afterDelete", refresh);
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function handleExportPdf() {
+    setExportingPdf(true);
+    try {
+      measureSync("pdf.hours.export", () =>
+        exportHoursToPDF(visibleRecords, companies, companyFilter, pdfIssuer),
+        { records: visibleRecords.length },
+      );
+    } finally {
+      setExportingPdf(false);
+    }
   }
 
   return (
@@ -266,7 +300,7 @@ export default function HoursPage() {
             </Field>
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" icon={<Plus className="h-4 w-4" />}>{editingId ? "Actualizar" : "Guardar"}</Button>
+              <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>{submitting ? "Guardando..." : editingId ? "Actualizar" : "Guardar"}</Button>
               {editingId ? <Button type="button" variant="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>Cancelar</Button> : null}
             </div>
           </form>
@@ -300,8 +334,8 @@ export default function HoursPage() {
               </SelectInput>
               <TextInput type="date" value={fromFilter} onChange={(event) => setFromFilter(event.target.value)} />
               <TextInput type="date" value={toFilter} onChange={(event) => setToFilter(event.target.value)} />
-              <Button type="button" variant="secondary" icon={<Download className="h-4 w-4" />} onClick={() => exportHoursToPDF(visibleRecords, companies, companyFilter, pdfIssuer)}>
-                Descargar PDF
+              <Button type="button" variant="secondary" icon={<Download className="h-4 w-4" />} onClick={handleExportPdf} disabled={exportingPdf || visibleRecords.length === 0}>
+                {exportingPdf ? "Generando..." : "Descargar PDF"}
               </Button>
             </div>
           </div>
@@ -334,8 +368,8 @@ export default function HoursPage() {
                     <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(record)}>
                       Editar
                     </Button>
-                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(record.id)}>
-                      Eliminar
+                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(record.id)} disabled={deletingId === record.id}>
+                      {deletingId === record.id ? "Eliminando..." : "Eliminar"}
                     </Button>
                   </div>
                 </article>
@@ -372,7 +406,9 @@ export default function HoursPage() {
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
                         <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(record)}>Editar</Button>
-                        <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(record.id)}>Eliminar</Button>
+                        <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(record.id)} disabled={deletingId === record.id}>
+                          {deletingId === record.id ? "Eliminando..." : "Eliminar"}
+                        </Button>
                       </div>
                     </td>
                   </tr>

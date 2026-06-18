@@ -6,6 +6,7 @@ import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextInput } from "@/components/ui/field";
 import { useAuth } from "@/hooks/use-auth";
+import { measureAsync } from "@/lib/performance";
 import { listCompanies, listEmployees, saveEmployee, deleteEmployee } from "@/services/firestore-service";
 import type { Company, Employee, UpsertEmployeeInput } from "@/types/models";
 
@@ -26,6 +27,8 @@ export default function EmployeesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const companyName = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
@@ -54,23 +57,34 @@ export default function EmployeesPage() {
     setError("");
 
     try {
-      await saveEmployee(
-        tenantId,
-        {
-          ...form,
-          firstName: form.firstName.trim(),
-          lastName: form.lastName.trim(),
-          email: form.email?.trim() || "",
-          role: form.role?.trim() || "",
-          companyId: form.companyId || "",
+      setSubmitting(true);
+      await measureAsync(
+        "employees.save.total",
+        async () => {
+          await measureAsync("employees.save.write", () =>
+            saveEmployee(
+              tenantId,
+              {
+                ...form,
+                firstName: form.firstName.trim(),
+                lastName: form.lastName.trim(),
+                email: form.email?.trim() || "",
+                role: form.role?.trim() || "",
+                companyId: form.companyId || "",
+              },
+              editingId ?? undefined,
+            ),
+          );
+          setForm(emptyForm);
+          setEditingId(null);
+          await measureAsync("employees.refresh.afterSave", refresh);
         },
-        editingId ?? undefined,
+        { mode: editingId ? "edit" : "create" },
       );
-      setForm(emptyForm);
-      setEditingId(null);
-      await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar el empleado.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -88,8 +102,15 @@ export default function EmployeesPage() {
 
   async function handleDelete(id: string) {
     if (!tenantId || !window.confirm("Eliminar empleado?")) return;
-    await deleteEmployee(id, tenantId);
-    await refresh();
+    setDeletingId(id);
+    try {
+      await measureAsync("employees.delete.total", async () => {
+        await measureAsync("employees.delete.write", () => deleteEmployee(id, tenantId));
+        await measureAsync("employees.refresh.afterDelete", refresh);
+      });
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -126,7 +147,9 @@ export default function EmployeesPage() {
             </label>
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
             <div className="flex gap-2">
-              <Button type="submit" icon={<Plus className="h-4 w-4" />}>{editingId ? "Actualizar" : "Crear"}</Button>
+              <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>
+                {submitting ? "Guardando..." : editingId ? "Actualizar" : "Crear"}
+              </Button>
               {editingId ? (
                 <Button type="button" variant="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>
                   Cancelar
@@ -164,7 +187,9 @@ export default function EmployeesPage() {
                   </dl>
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(employee)}>Editar</Button>
-                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(employee.id)}>Baja</Button>
+                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(employee.id)} disabled={deletingId === employee.id}>
+                      {deletingId === employee.id ? "Procesando..." : "Baja"}
+                    </Button>
                   </div>
                 </article>
               ))
@@ -203,7 +228,9 @@ export default function EmployeesPage() {
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
                         <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(employee)}>Editar</Button>
-                        <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(employee.id)}>Baja</Button>
+                        <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(employee.id)} disabled={deletingId === employee.id}>
+                          {deletingId === employee.id ? "Procesando..." : "Baja"}
+                        </Button>
                       </div>
                     </td>
                   </tr>

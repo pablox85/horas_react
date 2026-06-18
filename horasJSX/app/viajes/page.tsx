@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Timestamp } from "firebase/firestore";
 import { Download, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextInput } from "@/components/ui/field";
 import { formatCurrency, formatISODate } from "@/lib/formatters";
+import { measureAsync, measureSync } from "@/lib/performance";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import { calculateKmCost } from "@/services/calculation-service";
@@ -34,6 +36,10 @@ const emptyForm: TripForm = {
   ratePerKm: 0,
 };
 
+function sortTripsByDate(trips: DistanceTrip[]) {
+  return [...trips].sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export default function DistanceTripsPage() {
   const { tenantId } = useAuth();
   const { pdfIssuer } = useUserProfile();
@@ -43,6 +49,9 @@ export default function DistanceTripsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const companyName = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
@@ -104,13 +113,45 @@ export default function DistanceTripsPage() {
     };
 
     try {
+      setSubmitting(true);
       setError("");
-      await saveDistanceTrip(tenantId, input, editingId ?? undefined);
-      setForm(emptyForm);
-      setEditingId(null);
-      await refresh();
+      await measureAsync(
+        "trips.save.total",
+        async () => {
+          const savedId = await measureAsync("trips.save.write", () =>
+            saveDistanceTrip(tenantId, input, editingId ?? undefined),
+          );
+          const now = Timestamp.now();
+          const savedTrip: DistanceTrip = {
+            id: savedId,
+            tenantId,
+            ...input,
+            createdAt: now,
+            updatedAt: now,
+          };
+          setTrips((currentTrips) =>
+            sortTripsByDate(
+              editingId
+                ? currentTrips.map((trip) =>
+                    trip.id === savedId
+                      ? { ...trip, ...input, updatedAt: now }
+                      : trip,
+                  )
+                : [savedTrip, ...currentTrips],
+            ),
+          );
+          setForm(emptyForm);
+          setEditingId(null);
+          measureSync("trips.localState.afterSave", () => undefined, {
+            mode: editingId ? "edit" : "create",
+          });
+        },
+        { mode: editingId ? "edit" : "create" },
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar el viaje.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -128,8 +169,28 @@ export default function DistanceTripsPage() {
   async function handleDelete(id: string) {
     if (!tenantId || !window.confirm("Eliminar viaje por distancia?")) return;
 
-    await deleteDistanceTrip(id, tenantId);
-    await refresh();
+    setDeletingId(id);
+    try {
+      await measureAsync("trips.delete.total", async () => {
+        await measureAsync("trips.delete.write", () => deleteDistanceTrip(id, tenantId));
+        setTrips((currentTrips) => currentTrips.filter((trip) => trip.id !== id));
+        measureSync("trips.localState.afterDelete", () => undefined);
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function handleExportPdf() {
+    setExportingPdf(true);
+    try {
+      measureSync("pdf.trips.export", () =>
+        exportDistanceTripsToPDF(trips, companies, pdfIssuer),
+        { trips: trips.length },
+      );
+    } finally {
+      setExportingPdf(false);
+    }
   }
 
   return (
@@ -211,8 +272,8 @@ export default function DistanceTripsPage() {
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" icon={<Plus className="h-4 w-4" />}>
-                {editingId ? "Actualizar" : "Guardar"}
+              <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>
+                {submitting ? "Guardando..." : editingId ? "Actualizar" : "Guardar"}
               </Button>
               {editingId ? (
                 <Button
@@ -253,10 +314,10 @@ export default function DistanceTripsPage() {
               type="button"
               variant="secondary"
               icon={<Download className="h-4 w-4" />}
-              onClick={() => exportDistanceTripsToPDF(trips, companies, pdfIssuer)}
-              disabled={trips.length === 0}
+              onClick={handleExportPdf}
+              disabled={exportingPdf || trips.length === 0}
             >
-              Descargar PDF
+              {exportingPdf ? "Generando..." : "Descargar PDF"}
             </Button>
           </div>
 
@@ -299,8 +360,8 @@ export default function DistanceTripsPage() {
                     <Button type="button" variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => startEdit(trip)}>
                       Editar
                     </Button>
-                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(trip.id)}>
-                      Eliminar
+                    <Button type="button" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => handleDelete(trip.id)} disabled={deletingId === trip.id}>
+                      {deletingId === trip.id ? "Eliminando..." : "Eliminar"}
                     </Button>
                   </div>
                 </article>
@@ -360,8 +421,9 @@ export default function DistanceTripsPage() {
                             variant="danger"
                             icon={<Trash2 className="h-4 w-4" />}
                             onClick={() => handleDelete(trip.id)}
+                            disabled={deletingId === trip.id}
                           >
-                            Eliminar
+                            {deletingId === trip.id ? "Eliminando..." : "Eliminar"}
                           </Button>
                         </div>
                       </td>
