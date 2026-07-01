@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import { isDemoMode } from "@/lib/demo";
 import { formatCurrency, formatDisplayTime } from "@/lib/formatters";
 import type { Company, DistanceTrip, Employee, HourRecord } from "@/types/models";
+import { getRGB } from "pdfjs-dist";
 
 export interface PdfIssuer {
   companyName?: string;
@@ -75,16 +76,35 @@ function addDemoWatermark(doc: jsPDF) {
   if (!isDemoMode()) return;
 
   const totalPages = doc.getNumberOfPages();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const angle = 35;
+  const titleFontSize = 17;
+  const contactFontSize = 13;
+  const contactMarginTop = 14;
 
   for (let page = 1; page <= totalPages; page += 1) {
     doc.setPage(page);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(46);
-    doc.setTextColor(225, 225, 225);
-    doc.text("USUARIO DEMO", 105, 150, {
-      align: "center",
-      angle: 35,
-    });
+
+    for (let y = -24; y < pageHeight + 58; y += 72) {
+      for (let x = -42; x < pageWidth + 70; x += 108) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(titleFontSize);
+        doc.setTextColor(115, 115, 115);
+        doc.text("USUARIO DEMO", x, y, {
+          align: "center",
+          angle,
+        });
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(contactFontSize);
+        doc.setTextColor(64, 122, 64);
+        doc.text("BPR Soluciones +598 91 343 651", x, y + contactMarginTop, {
+          align: "center",
+          angle,
+        });
+      }
+    }
+
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
