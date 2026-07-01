@@ -130,11 +130,6 @@ export function exportHoursToPDF(
   doc.text("TOTAL", 20, y);
   doc.text(formatDisplayTime(totalHours), 136, y);
   doc.text(formatCurrency(totalCost), 162, y);
- // y += 10;
- // doc.setFont("helvetica", "normal");
-//  doc.text(`Tarifa base: $//{formatCurrency(DEFAULT_HOURLY_RATE)}/hora`, 105, y, {
-   // align: "center",
- // });
 
   doc.save(`control_horas_${new Date().toISOString().split("T")[0]}.pdf`);
 }
