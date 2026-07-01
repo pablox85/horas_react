@@ -1,8 +1,8 @@
 "use client";
 
 import { jsPDF } from "jspdf";
+import { isDemoMode } from "@/lib/demo";
 import { formatCurrency, formatDisplayTime } from "@/lib/formatters";
-import { DEFAULT_HOURLY_RATE } from "@/services/calculation-service";
 import type { Company, DistanceTrip, Employee, HourRecord } from "@/types/models";
 
 export interface PdfIssuer {
@@ -71,6 +71,59 @@ function addWrappedNote(doc: jsPDF, note: string | undefined, y: number): number
   return y + noteLines.length * 5 + 3;
 }
 
+function addDemoWatermark(doc: jsPDF) {
+  if (!isDemoMode()) return;
+
+  const totalPages = doc.getNumberOfPages();
+
+  for (let page = 1; page <= totalPages; page += 1) {
+    doc.setPage(page);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(46);
+    doc.setTextColor(225, 225, 225);
+    doc.text("USUARIO DEMO", 105, 150, {
+      align: "center",
+      angle: 35,
+    });
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+  }
+}
+
+function resolveHourlyRateFooter(
+  records: HourRecord[],
+  companies: Company[],
+  selectedCompany: Company | null,
+): string {
+  if (selectedCompany) {
+    return `Tarifa por hora: ${formatCurrency(selectedCompany.hourlyRate)}`;
+  }
+
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const hourlyRates = new Map<string, number>();
+
+  records.forEach((record) => {
+    if (!record.companyId) return;
+
+    const company = companyById.get(record.companyId);
+    if (!company) return;
+
+    hourlyRates.set(company.name, company.hourlyRate);
+  });
+
+  if (hourlyRates.size === 0) return "";
+
+  const uniqueRates = new Set(hourlyRates.values());
+  if (uniqueRates.size === 1) {
+    return `Tarifa por hora: ${formatCurrency([...uniqueRates][0])}`;
+  }
+
+  return `Tarifas por hora: ${[...hourlyRates]
+    .map(([companyName, hourlyRate]) => `${companyName} ${formatCurrency(hourlyRate)}`)
+    .join(" · ")}`;
+}
+
 export function exportHoursToPDF(
   records: HourRecord[],
   companies: Company[] = [],
@@ -84,7 +137,7 @@ export function exportHoursToPDF(
 
   const companyName = new Map(companies.map((company) => [company.id, company.name]));
   const selectedCompany = selectedCompanyId
-    ? companies.find((company) => company.id === selectedCompanyId)
+    ? companies.find((company) => company.id === selectedCompanyId) ?? null
     : null;
   const doc = new jsPDF();
   const totalCost = records.reduce((sum, record) => sum + record.cost, 0);
@@ -131,6 +184,19 @@ export function exportHoursToPDF(
   doc.text(formatDisplayTime(totalHours), 136, y);
   doc.text(formatCurrency(totalCost), 162, y);
 
+  const hourlyRateFooter = resolveHourlyRateFooter(records, companies, selectedCompany);
+
+
+  if (hourlyRateFooter) {
+    y += 10;
+    doc.setFont("helvetica", "normal");
+    doc.text(hourlyRateFooter, 105, y, {
+      align: "center",
+      maxWidth: 170,
+    });
+  }
+
+  addDemoWatermark(doc);
   doc.save(`control_horas_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
@@ -186,6 +252,7 @@ export function exportDistanceTripsToPDF(
   doc.text(`${totalKm.toFixed(1)} km`, 108, y);
   doc.text(formatCurrency(totalCost), 164, y);
 
+  addDemoWatermark(doc);
   doc.save(`viajes_distancia_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
@@ -269,5 +336,6 @@ export function exportTotalTripsToPDF({
   doc.text("TOTAL", 20, y);
   doc.text(formatCurrency(totalCost), 166, y);
 
+  addDemoWatermark(doc);
   doc.save(`total_viajes_${new Date().toISOString().split("T")[0]}.pdf`);
 }

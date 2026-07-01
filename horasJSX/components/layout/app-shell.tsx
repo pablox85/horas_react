@@ -29,7 +29,7 @@ const navItems = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, logout, isDemo } = useAuth();
   const { darkMode, toggleTheme } = useTheme();
   const { displayName } = useUserProfile();
 
@@ -81,6 +81,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+        {isDemo ? (
+          <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 shadow-sm dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <span>Cuenta demo, los cambios no se guardarán</span>
+              <span>Powered by: BPR Soluciones</span>
+            </div>
+          </div>
+        ) : null}
         <div className="mb-5 flex min-w-0 flex-col gap-1 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
           <span className="min-w-0 break-words">{user?.email ?? "Sesion activa"}</span>
           <span className="min-w-0 break-words font-medium">{displayName}</span>

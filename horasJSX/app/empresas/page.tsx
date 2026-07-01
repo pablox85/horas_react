@@ -9,8 +9,14 @@ import { Field, TextInput } from "@/components/ui/field";
 import { formatCurrency } from "@/lib/formatters";
 import { measureAsync } from "@/lib/performance";
 import { useAuth } from "@/hooks/use-auth";
-import { deleteCompany, listCompanies, saveCompany } from "@/services/firestore-service";
-import type { Company, UpsertCompanyInput } from "@/types/models";
+import {
+  deleteCompany,
+  listCompanies,
+  listCurrentAccounts,
+  saveCompany,
+  saveCurrentAccount,
+} from "@/services/firestore-service";
+import type { Company, CurrentAccount, UpsertCompanyInput } from "@/types/models";
 
 const emptyForm: UpsertCompanyInput = {
   name: "",
@@ -18,17 +24,23 @@ const emptyForm: UpsertCompanyInput = {
   address: "",
   contactEmail: "",
   hourlyRate: 625,
+  pricePerKm: undefined,
 };
 
 export default function CompaniesPage() {
   const { tenantId } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [currentAccounts, setCurrentAccounts] = useState<CurrentAccount[]>([]);
   const [form, setForm] = useState<UpsertCompanyInput>(emptyForm);
+  const [accountSaldo, setAccountSaldo] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const accountByCompany = new Map(
+    currentAccounts.map((account) => [account.companyId, account]),
+  );
 
   const refresh = useCallback(async () => {
     if (!tenantId) return;
@@ -36,7 +48,12 @@ export default function CompaniesPage() {
     setError("");
 
     try {
-      setCompanies(await listCompanies(tenantId));
+      const [nextCompanies, nextCurrentAccounts] = await Promise.all([
+        listCompanies(tenantId),
+        listCurrentAccounts(tenantId),
+      ]);
+      setCompanies(nextCompanies);
+      setCurrentAccounts(nextCurrentAccounts);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "No se pudieron cargar las empresas.";
       console.error("Error cargando empresas:", caught);
@@ -70,11 +87,18 @@ export default function CompaniesPage() {
                 address: form.address?.trim() || "",
                 contactEmail: form.contactEmail?.trim() || "",
                 hourlyRate: Number(form.hourlyRate) || 0,
+                pricePerKm: Number(form.pricePerKm) || undefined,
               },
               editingId ?? undefined,
+            ).then((companyId) =>
+              saveCurrentAccount(tenantId, {
+                companyId,
+                saldo: Number(accountSaldo) || 0,
+              }),
             ),
           );
           setForm(emptyForm);
+          setAccountSaldo(0);
           setEditingId(null);
           await measureAsync("companies.refresh.afterSave", refresh);
         },
@@ -110,7 +134,9 @@ export default function CompaniesPage() {
       address: company.address ?? "",
       contactEmail: company.contactEmail ?? "",
       hourlyRate: company.hourlyRate,
+      pricePerKm: company.pricePerKm,
     });
+    setAccountSaldo(accountByCompany.get(company.id)?.saldo ?? 0);
   }
 
   return (
@@ -133,6 +159,12 @@ export default function CompaniesPage() {
             </Field>
             <Field label="Tarifa por hora">
               <TextInput type="number" min="0" step="0.01" value={form.hourlyRate} onChange={(event) => setForm({ ...form, hourlyRate: Number(event.target.value) || 0 })} />
+            </Field>
+            <Field label="Precio por km">
+              <TextInput type="number" min="0" step="0.01" value={form.pricePerKm || ""} onChange={(event) => setForm({ ...form, pricePerKm: Number(event.target.value) || undefined })} />
+            </Field>
+            <Field label="Saldo a favor">
+              <TextInput type="number" min="0" step="0.01" value={accountSaldo || ""} onChange={(event) => setAccountSaldo(Number(event.target.value) || 0)} />
             </Field>
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
             <div className="flex gap-2">
@@ -167,6 +199,10 @@ export default function CompaniesPage() {
                   <p className="text-sm text-slate-500 dark:text-slate-400">RUT: {company.rut || "-"}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">{company.address || "Sin direccion"}</p>
                   <p className="mt-2 text-sm font-semibold">Tarifa: {formatCurrency(company.hourlyRate)}/hora</p>
+                  <p className="text-sm font-semibold">Precio/km: {company.pricePerKm ? formatCurrency(company.pricePerKm) : "-"}</p>
+                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                    Saldo a favor: {formatCurrency(accountByCompany.get(company.id)?.saldo ?? 0)}
+                  </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold dark:border-slate-700" href={`/empresas/${company.id}`}>

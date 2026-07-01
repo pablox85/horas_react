@@ -10,17 +10,28 @@ import {
   getDocs,
   limit,
   query,
+  runTransaction,
   setDoc,
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import {
+  applyDemoCurrentAccountToDistanceTrip,
+  getDemoEntity,
+  isDemoMode,
+  listDemoEntities,
+  removeDemoEntity,
+  saveDemoEntity,
+} from "@/lib/demo";
 import { docWithTenant, ensureTenantId } from "@/lib/tenant";
 import type {
   Company,
+  CurrentAccount,
   DistanceTrip,
   Employee,
   HourRecord,
   UpsertCompanyInput,
+  UpsertCurrentAccountInput,
   UpsertDistanceTripInput,
   UpsertEmployeeInput,
   UpsertHourRecordInput,
@@ -32,6 +43,10 @@ type TimestampedTenantEntity = TenantEntity & {
   updatedAt: Timestamp;
 };
 type FirestorePayload = Record<string, unknown>;
+interface CurrentAccountApplication {
+  discount: number;
+  pendingDebtAmount: number;
+}
 
 const LOCAL_PREFIX = "control_horas_local";
 const isBrowser = typeof window !== "undefined";
@@ -124,12 +139,80 @@ function saveLocalEntity<T extends TimestampedTenantEntity, I extends object>(
   return nextId;
 }
 
+function getCurrentAccountDocumentId(companyId: string): string {
+  return companyId;
+}
+
+function applyCurrentAccountBalance(
+  saldo: number,
+  tripCost: number,
+): CurrentAccountApplication {
+  const safeSaldo = Math.max(0, Number(saldo) || 0);
+  const safeTripCost = Math.max(0, Number(tripCost) || 0);
+  const discount = Math.min(safeSaldo, safeTripCost);
+
+  return {
+    discount,
+    pendingDebtAmount: safeTripCost - discount,
+  };
+}
+
+function applyLocalCurrentAccountToTrip(
+  tenantId: string,
+  input: UpsertDistanceTripInput,
+): UpsertDistanceTripInput {
+  if (!input.companyId) {
+    return {
+      ...input,
+      currentAccountDiscount: 0,
+      pendingDebtAmount: input.cost,
+    };
+  }
+
+  const safeTenantId = ensureTenantId(tenantId);
+  const accountId = getCurrentAccountDocumentId(input.companyId);
+  const accounts = readLocalCollection<CurrentAccount>("currentAccounts", safeTenantId);
+  const account = accounts.find((item) => item.id === accountId);
+
+  if (!account) {
+    return {
+      ...input,
+      currentAccountDiscount: 0,
+      pendingDebtAmount: input.cost,
+    };
+  }
+
+  const now = Timestamp.now();
+  const application = applyCurrentAccountBalance(account.saldo, input.cost);
+  const nextAccount: CurrentAccount = {
+    ...account,
+    saldo: account.saldo - application.discount,
+    updatedAt: now,
+  };
+
+  writeLocalCollection(
+    "currentAccounts",
+    safeTenantId,
+    accounts.map((item) => (item.id === accountId ? nextAccount : item)),
+  );
+
+  return {
+    ...input,
+    currentAccountDiscount: application.discount,
+    pendingDebtAmount: application.pendingDebtAmount,
+  };
+}
+
 async function listByTenant<T extends TenantEntity>(
   collectionName: string,
   tenantId: string,
   sortField = "createdAt",
 ): Promise<T[]> {
   const safeTenantId = ensureTenantId(tenantId);
+
+  if (isDemoMode()) {
+    return listDemoEntities<T>(collectionName as never, safeTenantId, sortField);
+  }
 
   if (!db) {
     return readLocalCollection<T>(collectionName, safeTenantId).sort((a, b) =>
@@ -153,6 +236,10 @@ async function getByTenant<T extends TenantEntity>(
   tenantId: string,
 ): Promise<T | null> {
   const safeTenantId = ensureTenantId(tenantId);
+
+  if (isDemoMode()) {
+    return getDemoEntity<T>(collectionName as never, safeTenantId, id);
+  }
 
   if (!db) {
     return (
@@ -180,6 +267,11 @@ async function removeByTenant(
 
   if (!existing) {
     throw new Error("No se encontro el registro en el tenant activo.");
+  }
+
+  if (isDemoMode()) {
+    removeDemoEntity(collectionName as never, ensureTenantId(tenantId), id);
+    return;
   }
 
   if (!db) {
@@ -217,6 +309,10 @@ export async function saveCompany(
     ...(id ? {} : { createdAt: now }),
   });
 
+  if (isDemoMode()) {
+    return saveDemoEntity<Company>("companies", safeTenantId, input, id);
+  }
+
   if (!db) {
     return saveLocalEntity<Company, UpsertCompanyInput>(
       "companies",
@@ -241,6 +337,72 @@ export async function deleteCompany(id: string, tenantId: string): Promise<void>
   await removeByTenant("companies", id, tenantId);
 }
 
+export async function listCurrentAccounts(tenantId: string): Promise<CurrentAccount[]> {
+  return listByTenant<CurrentAccount>("currentAccounts", tenantId, "updatedAt");
+}
+
+export async function getCurrentAccountByCompany(
+  tenantId: string,
+  companyId: string,
+): Promise<CurrentAccount | null> {
+  return getByTenant<CurrentAccount>(
+    "currentAccounts",
+    getCurrentAccountDocumentId(companyId),
+    tenantId,
+  );
+}
+
+export async function saveCurrentAccount(
+  tenantId: string,
+  input: UpsertCurrentAccountInput,
+): Promise<string> {
+  const safeTenantId = ensureTenantId(tenantId);
+  const id = getCurrentAccountDocumentId(input.companyId);
+  const now = Timestamp.now();
+
+  if (isDemoMode()) {
+    return saveDemoEntity<CurrentAccount>(
+      "currentAccounts",
+      safeTenantId,
+      {
+        ...input,
+        saldo: Math.max(0, Number(input.saldo) || 0),
+      },
+      id,
+    );
+  }
+
+  if (!db) {
+    const existing = readLocalCollection<CurrentAccount>("currentAccounts", safeTenantId).find(
+      (account) => account.id === id,
+    );
+
+    return saveLocalEntity<CurrentAccount, UpsertCurrentAccountInput>(
+      "currentAccounts",
+      safeTenantId,
+      {
+        ...input,
+        saldo: Math.max(0, Number(input.saldo) || 0),
+      },
+      existing?.id ?? id,
+    );
+  }
+
+  const firestore = requireDb();
+  const currentAccountRef = doc(firestore, "currentAccounts", id);
+  const currentAccount = await getCurrentAccountByCompany(safeTenantId, input.companyId);
+  const payload = removeUndefinedFields({
+    ...input,
+    saldo: Math.max(0, Number(input.saldo) || 0),
+    tenantId: safeTenantId,
+    updatedAt: now,
+    ...(currentAccount ? {} : { createdAt: now }),
+  });
+
+  await setDoc(currentAccountRef, payload, { merge: true });
+  return id;
+}
+
 export async function listEmployees(tenantId: string): Promise<Employee[]> {
   return listByTenant<Employee>("employees", tenantId, "lastName");
 }
@@ -258,6 +420,10 @@ export async function saveEmployee(
     updatedAt: now,
     ...(id ? {} : { createdAt: now }),
   });
+
+  if (isDemoMode()) {
+    return saveDemoEntity<Employee>("employees", safeTenantId, input, id);
+  }
 
   if (!db) {
     return saveLocalEntity<Employee, UpsertEmployeeInput>(
@@ -331,6 +497,10 @@ export async function saveHourRecord(
     ...(id ? {} : { createdAt: now }),
   });
 
+  if (isDemoMode()) {
+    return saveDemoEntity<HourRecord>("hourRecords", safeTenantId, input, id);
+  }
+
   if (!db) {
     return saveLocalEntity<HourRecord, UpsertHourRecordInput>(
       "hourRecords",
@@ -373,11 +543,20 @@ export async function saveDistanceTrip(
     ...(id ? {} : { createdAt: now }),
   });
 
+  if (isDemoMode()) {
+    return saveDemoEntity<DistanceTrip>(
+      "distanceTrips",
+      safeTenantId,
+      id ? input : applyDemoCurrentAccountToDistanceTrip(safeTenantId, input),
+      id,
+    );
+  }
+
   if (!db) {
     return saveLocalEntity<DistanceTrip, UpsertDistanceTripInput>(
       "distanceTrips",
       safeTenantId,
-      input,
+      id ? input : applyLocalCurrentAccountToTrip(safeTenantId, input),
       id,
     );
   }
@@ -389,8 +568,59 @@ export async function saveDistanceTrip(
     return id;
   }
 
-  const created = await addDoc(collection(firestore, "distanceTrips"), payload);
-  return created.id;
+  const createdRef = doc(collection(firestore, "distanceTrips"));
+
+  await runTransaction(firestore, async (transaction) => {
+    let currentAccountDiscount = 0;
+    let pendingDebtAmount = input.cost;
+
+    if (input.companyId) {
+      const currentAccountRef = doc(
+        firestore,
+        "currentAccounts",
+        getCurrentAccountDocumentId(input.companyId),
+      );
+      const currentAccountSnapshot = await transaction.get(currentAccountRef);
+
+      if (currentAccountSnapshot.exists()) {
+        const currentAccount = {
+          id: currentAccountSnapshot.id,
+          ...currentAccountSnapshot.data(),
+        } as CurrentAccount;
+
+        if (currentAccount.tenantId !== safeTenantId) {
+          throw new Error("La cuenta corriente no pertenece al tenant activo.");
+        }
+
+        const application = applyCurrentAccountBalance(currentAccount.saldo, input.cost);
+        currentAccountDiscount = application.discount;
+        pendingDebtAmount = application.pendingDebtAmount;
+
+        transaction.set(
+          currentAccountRef,
+          {
+            saldo: currentAccount.saldo - currentAccountDiscount,
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+      }
+    }
+
+    transaction.set(
+      createdRef,
+      removeUndefinedFields({
+        ...input,
+        tenantId: safeTenantId,
+        currentAccountDiscount,
+        pendingDebtAmount,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
+  });
+
+  return createdRef.id;
 }
 
 export async function deleteDistanceTrip(id: string, tenantId: string): Promise<void> {

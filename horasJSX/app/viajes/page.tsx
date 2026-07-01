@@ -40,6 +40,11 @@ function sortTripsByDate(trips: DistanceTrip[]) {
   return [...trips].sort((a, b) => b.date.localeCompare(a.date));
 }
 
+function getCompanyPricePerKm(company: Company | undefined): number | null {
+  const pricePerKm = Number(company?.pricePerKm) || 0;
+  return pricePerKm > 0 ? pricePerKm : null;
+}
+
 export default function DistanceTripsPage() {
   const { tenantId } = useAuth();
   const { pdfIssuer } = useUserProfile();
@@ -55,6 +60,10 @@ export default function DistanceTripsPage() {
 
   const companyName = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
+    [companies],
+  );
+  const companyById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company])),
     [companies],
   );
   const currentCost = calculateKmCost(
@@ -90,13 +99,31 @@ export default function DistanceTripsPage() {
     void refresh();
   }, [refresh]);
 
+  function handleCompanyChange(companyId: string) {
+    const companyPricePerKm = getCompanyPricePerKm(companyById.get(companyId));
+
+    setForm({
+      ...form,
+      companyId,
+      ratePerKm: companyId ? companyPricePerKm ?? 0 : form.ratePerKm,
+    });
+    setError(companyId && !companyPricePerKm ? "La empresa seleccionada no tiene precio por km configurado." : "");
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!tenantId) return;
 
     const tripName = form.tripName.trim();
     const kilometers = Number(form.kilometers) || 0;
-    const ratePerKm = Number(form.ratePerKm) || 0;
+    const selectedCompany = form.companyId ? companyById.get(form.companyId) : undefined;
+    const companyPricePerKm = form.companyId ? getCompanyPricePerKm(selectedCompany) : null;
+    const ratePerKm = companyPricePerKm ?? (Number(form.ratePerKm) || 0);
+
+    if (form.companyId && !companyPricePerKm) {
+      setError("La empresa seleccionada no tiene precio por km configurado.");
+      return;
+    }
 
     if (!tripName || !form.date || kilometers <= 0 || ratePerKm <= 0) {
       setError("Ingresa viaje, fecha, kilometros y precio por km validos.");
@@ -162,7 +189,7 @@ export default function DistanceTripsPage() {
       companyId: trip.companyId ?? "",
       date: trip.date,
       kilometers: trip.kilometers,
-      ratePerKm: trip.ratePerKm,
+      ratePerKm: getCompanyPricePerKm(companyById.get(trip.companyId ?? "")) ?? trip.ratePerKm,
     });
   }
 
@@ -219,7 +246,7 @@ export default function DistanceTripsPage() {
             <Field label="Empresa">
               <SelectInput
                 value={form.companyId}
-                onChange={(event) => setForm({ ...form, companyId: event.target.value })}
+                onChange={(event) => handleCompanyChange(event.target.value)}
               >
                 <option value="">Sin empresa</option>
                 {companies.map((company) => (
@@ -257,6 +284,7 @@ export default function DistanceTripsPage() {
                   step="0.01"
                   type="number"
                   value={form.ratePerKm || ""}
+                  readOnly={Boolean(form.companyId)}
                   onChange={(event) =>
                     setForm({ ...form, ratePerKm: Number(event.target.value) || 0 })
                   }

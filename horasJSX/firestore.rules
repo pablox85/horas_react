@@ -25,6 +25,11 @@ service cloud.firestore {
       allow create: if isTenantWrite();
     }
 
+    match /currentAccounts/{documentId} {
+      allow read, update, delete: if isTenantRead();
+      allow create: if isTenantWrite();
+    }
+
     match /employees/{documentId} {
       allow read, update, delete: if isTenantRead();
       allow create: if isTenantWrite();

@@ -19,13 +19,17 @@ import {
   type ReactNode,
 } from "react";
 import { auth } from "@/lib/firebase";
+import { isDemoIdentity, resetDemoStore, setDemoMode } from "@/lib/demo";
 import { resolveTenantId, SESSION_COOKIE, TENANT_COOKIE } from "@/lib/tenant";
 
-type AuthenticatedUser = Pick<User, "uid" | "email" | "displayName">;
+type AuthenticatedUser = Pick<User, "uid" | "email" | "displayName"> & {
+  isDemo: boolean;
+};
 
 interface AuthState {
   user: AuthenticatedUser | null;
   tenantId: string | null;
+  isDemo: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -44,6 +48,7 @@ function clearCookie(name: string): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const router = useRouter();
@@ -68,10 +73,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
+          const tokenResult = await firebaseUser.getIdTokenResult();
+          const nextIsDemo = isDemoIdentity({
+            email: firebaseUser.email,
+            claims: tokenResult.claims,
+          });
+
+          setDemoMode(nextIsDemo);
+          setIsDemo(nextIsDemo);
           setUser({
             uid: firebaseUser.uid,
             email: firebaseUser.email,
             displayName: firebaseUser.displayName,
+            isDemo: nextIsDemo,
           });
 
           const token = await firebaseUser.getIdToken();
@@ -87,6 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setUser(null);
           setTenantId(null);
+          setIsDemo(false);
+          setDemoMode(false);
+          resetDemoStore();
           clearCookie(SESSION_COOKIE);
           clearCookie(TENANT_COOKIE);
 
@@ -124,6 +141,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     await signOut(auth);
+    setDemoMode(false);
+    resetDemoStore();
     clearCookie(SESSION_COOKIE);
     clearCookie(TENANT_COOKIE);
     router.replace("/login");
@@ -133,11 +152,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       tenantId,
+      isDemo,
       loading,
       login,
       logout,
     }),
-    [user, tenantId, loading, login, logout]
+    [user, tenantId, isDemo, loading, login, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

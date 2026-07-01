@@ -19,6 +19,16 @@ export interface Company {
   address?: string;
   contactEmail?: string;
   hourlyRate: number;
+  pricePerKm?: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CurrentAccount {
+  id: string;
+  tenantId: string;
+  companyId: string;
+  saldo: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -59,6 +69,8 @@ export interface DistanceTrip {
   kilometers: number;
   ratePerKm: number;
   cost: number;
+  currentAccountDiscount?: number;
+  pendingDebtAmount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -70,6 +82,11 @@ export type UpsertEmployeeInput = Omit<
 
 export type UpsertCompanyInput = Omit<
   Company,
+  "id" | "tenantId" | "createdAt" | "updatedAt"
+>;
+
+export type UpsertCurrentAccountInput = Omit<
+  CurrentAccount,
   "id" | "tenantId" | "createdAt" | "updatedAt"
 >;
 
