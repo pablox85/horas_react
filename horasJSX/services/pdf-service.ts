@@ -4,7 +4,6 @@ import { jsPDF } from "jspdf";
 import { isDemoMode } from "@/lib/demo";
 import { formatCurrency, formatDisplayTime } from "@/lib/formatters";
 import type { Company, DistanceTrip, Employee, HourRecord } from "@/types/models";
-import { getRGB } from "pdfjs-dist";
 
 export interface PdfIssuer {
   companyName?: string;
@@ -59,7 +58,7 @@ function addWrappedNote(doc: jsPDF, note: string | undefined, y: number): number
   const noteLines = doc.splitTextToSize(`Nota: ${cleanNote}`, 165) as string[];
 
   if (y + noteLines.length * 5 > 270) {
-    doc.addPage();
+    addWatermarkedPage(doc);
     y = 24;
   }
 
@@ -72,10 +71,9 @@ function addWrappedNote(doc: jsPDF, note: string | undefined, y: number): number
   return y + noteLines.length * 5 + 3;
 }
 
-function addDemoWatermark(doc: jsPDF) {
+function addDemoWatermarkBackground(doc: jsPDF) {
   if (!isDemoMode()) return;
 
-  const totalPages = doc.getNumberOfPages();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const angle = 35;
@@ -83,32 +81,39 @@ function addDemoWatermark(doc: jsPDF) {
   const contactFontSize = 13;
   const contactMarginTop = 14;
 
-  for (let page = 1; page <= totalPages; page += 1) {
-    doc.setPage(page);
-
-    for (let y = -24; y < pageHeight + 58; y += 72) {
-      for (let x = -42; x < pageWidth + 70; x += 108) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(titleFontSize);
-        doc.setTextColor(115, 115, 115);
-        doc.text("USUARIO DEMO", x, y, {
-          align: "center",
-          angle,
-        });
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(contactFontSize);
-        doc.setTextColor(64, 122, 64);
-        doc.text("BPR Soluciones +598 91 343 651", x, y + contactMarginTop, {
-          align: "center",
-          angle,
-        });
-      }
+  for (let y = -24; y < pageHeight + 58; y += 72) {
+    for (let x = -42; x < pageWidth + 70; x += 108) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(titleFontSize);
+      doc.setTextColor(200, 200, 200);
+      doc.text("USUARIO DEMO", x, y, {
+        align: "center",
+        angle,
+      });
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(contactFontSize);
+      doc.setTextColor(64, 122, 64);
+      doc.text("BPR Soluciones +598 91 343 651", x, y + contactMarginTop, {
+        align: "center",
+        angle,
+      });
     }
-
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
   }
+
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+}
+
+function createWatermarkedPdf(): jsPDF {
+  const doc = new jsPDF();
+  addDemoWatermarkBackground(doc);
+  return doc;
+}
+
+function addWatermarkedPage(doc: jsPDF) {
+  doc.addPage();
+  addDemoWatermarkBackground(doc);
 }
 
 function resolveHourlyRateFooter(
@@ -159,7 +164,7 @@ export function exportHoursToPDF(
   const selectedCompany = selectedCompanyId
     ? companies.find((company) => company.id === selectedCompanyId) ?? null
     : null;
-  const doc = new jsPDF();
+  const doc = createWatermarkedPdf();
   const totalCost = records.reduce((sum, record) => sum + record.cost, 0);
   const totalHours = records.reduce((sum, record) => sum + record.hoursWorked, 0);
   const header = selectedCompany
@@ -180,7 +185,7 @@ export function exportHoursToPDF(
 
   records.forEach((record) => {
     if (y > 270) {
-      doc.addPage();
+      addWatermarkedPage(doc);
       y = 24;
     }
 
@@ -216,7 +221,6 @@ export function exportHoursToPDF(
     });
   }
 
-  addDemoWatermark(doc);
   doc.save(`control_horas_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
@@ -231,7 +235,7 @@ export function exportDistanceTripsToPDF(
   }
 
   const companyName = new Map(companies.map((company) => [company.id, company.name]));
-  const doc = new jsPDF();
+  const doc = createWatermarkedPdf();
   const totalKm = trips.reduce((sum, trip) => sum + trip.kilometers, 0);
   const totalCost = trips.reduce((sum, trip) => sum + trip.cost, 0);
   const header = resolvePdfHeaderTitle("Viajes por Distancia", issuer);
@@ -249,7 +253,7 @@ export function exportDistanceTripsToPDF(
 
   trips.forEach((trip) => {
     if (y > 270) {
-      doc.addPage();
+      addWatermarkedPage(doc);
       y = 24;
     }
 
@@ -272,7 +276,6 @@ export function exportDistanceTripsToPDF(
   doc.text(`${totalKm.toFixed(1)} km`, 108, y);
   doc.text(formatCurrency(totalCost), 164, y);
 
-  addDemoWatermark(doc);
   doc.save(`viajes_distancia_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
@@ -320,7 +323,7 @@ export function exportTotalTripsToPDF({
     })),
   ].sort((a, b) => b.date.localeCompare(a.date));
   const totalCost = rows.reduce((sum, row) => sum + row.cost, 0);
-  const doc = new jsPDF();
+  const doc = createWatermarkedPdf();
   const header = resolvePdfHeaderTitle("Total de Viajes", issuer);
 
   let y = addPdfHeader(doc, header.title, header.rut);
@@ -336,7 +339,7 @@ export function exportTotalTripsToPDF({
 
   rows.forEach((row) => {
     if (y > 270) {
-      doc.addPage();
+      addWatermarkedPage(doc);
       y = 24;
     }
 
@@ -356,6 +359,5 @@ export function exportTotalTripsToPDF({
   doc.text("TOTAL", 20, y);
   doc.text(formatCurrency(totalCost), 166, y);
 
-  addDemoWatermark(doc);
   doc.save(`total_viajes_${new Date().toISOString().split("T")[0]}.pdf`);
 }
