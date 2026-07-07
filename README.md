@@ -31,3 +31,7 @@ La aplicacion vive en `horasJSX/`, pero los scripts de la raiz usan npm workspac
 ## Configuracion
 
 Usar variables `NEXT_PUBLIC_FIREBASE_*` en `horasJSX/.env.local` para desarrollo local y en Vercel para produccion.
+
+Para ingresar con cuenta demo
+Email: demo@demo.com
+Pwsd: demo1234
