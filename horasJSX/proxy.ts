@@ -3,7 +3,7 @@ import { SESSION_COOKIE } from "@/lib/tenant";
 
 const PUBLIC_ROUTES = ["/login"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
   const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
