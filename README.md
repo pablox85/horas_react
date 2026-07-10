@@ -1,37 +1,25 @@
 # Control de Viajes
 
-Aplicacion Next.js para gestionar empresas, empleados, horas trabajadas y viajes por distancia con Firebase Auth, Firestore y despliegue en Vercel.
+App para gestionar empresas, empleados, viajes por hora y viajes por km.
 
-## Arranque rapido
+## Uso local
 
 ```bash
 npm install
 npm run dev
 ```
 
-La aplicacion vive en `horasJSX/`, pero los scripts de la raiz usan npm workspaces.
+## Comandos
 
-## Scripts
+```bash
+npm run build
+npm run lint
+npm run typecheck
+```
 
-- `npm run dev`
-- `npm run build`
-- `npm run preview`
-- `npm run lint`
-- `npm run typecheck`
+## Demo
 
-## Estructura vigente
-
-- `horasJSX/app/`: rutas Next.js App Router.
-- `horasJSX/components/`: componentes compartidos.
-- `horasJSX/hooks/`: hooks de auth, tema y perfil.
-- `horasJSX/lib/`: Firebase, tenant y formatters.
-- `horasJSX/services/`: Firestore, calculos y PDF.
-- `horasJSX/types/`: modelos TypeScript.
-
-## Configuracion
-
-Usar variables `NEXT_PUBLIC_FIREBASE_*` en `horasJSX/.env.local` para desarrollo local y en Vercel para produccion.
-
-Para ingresar con cuenta demo
+```txt
 Email: demo@demo.com
-Pwsd: demo1234
+Password: demo1234
+```
