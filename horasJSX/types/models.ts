@@ -20,8 +20,11 @@ export interface Company {
   contactEmail?: string;
   hourlyRate: number;
   pricePerKm?: number;
+  creditBalance?: number;
+  credit_balance?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  updated_at?: Timestamp;
 }
 
 export interface CurrentAccount {
@@ -31,6 +34,29 @@ export interface CurrentAccount {
   saldo: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export type CurrentAccountMovementType = "credit" | "trip_charge" | "adjustment";
+
+export interface CurrentAccountMovement {
+  id: string;
+  tenantId: string;
+  tenant_id: string;
+  companyId: string;
+  company_id: string;
+  type: CurrentAccountMovementType;
+  amount: number;
+  balanceBefore: number;
+  balance_before: number;
+  balanceAfter: number;
+  balance_after: number;
+  tripId?: string | null;
+  trip_id?: string | null;
+  description: string;
+  createdAt: Timestamp;
+  created_at: Timestamp;
+  createdBy: string;
+  created_by: string;
 }
 
 export interface Employee {
@@ -55,6 +81,13 @@ export interface HourRecord {
   hoursWorked: number;
   notes?: string;
   cost: number;
+  costMode?: "calculated" | "manual";
+  manualCost?: number;
+  currentAccountDiscount?: number;
+  creditBalanceAfter?: number;
+  credit_balance_after?: number;
+  pendingAmount?: number;
+  pending_amount?: number;
   source: "manual" | "timer" | "pdf-import";
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -69,7 +102,13 @@ export interface DistanceTrip {
   kilometers: number;
   ratePerKm: number;
   cost: number;
+  costMode?: "calculated" | "manual";
+  manualCost?: number;
   currentAccountDiscount?: number;
+  creditBalanceAfter?: number;
+  credit_balance_after?: number;
+  pendingAmount?: number;
+  pending_amount?: number;
   pendingDebtAmount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;

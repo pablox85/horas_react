@@ -12,11 +12,12 @@ import {
   query,
   runTransaction,
   setDoc,
+  type Transaction,
   where,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import {
-  applyDemoCurrentAccountToDistanceTrip,
+  applyDemoCompanyCreditToTrip,
   getDemoEntity,
   isDemoMode,
   listDemoEntities,
@@ -27,6 +28,7 @@ import { docWithTenant, ensureTenantId } from "@/lib/tenant";
 import type {
   Company,
   CurrentAccount,
+  CurrentAccountMovement,
   DistanceTrip,
   Employee,
   HourRecord,
@@ -45,7 +47,8 @@ type TimestampedTenantEntity = TenantEntity & {
 type FirestorePayload = Record<string, unknown>;
 interface CurrentAccountApplication {
   discount: number;
-  pendingDebtAmount: number;
+  pendingAmount: number;
+  balanceAfter: number;
 }
 
 const LOCAL_PREFIX = "control_horas_local";
@@ -144,63 +147,474 @@ function getCurrentAccountDocumentId(companyId: string): string {
 }
 
 function applyCurrentAccountBalance(
-  saldo: number,
+  balance: number,
   tripCost: number,
 ): CurrentAccountApplication {
-  const safeSaldo = Math.max(0, Number(saldo) || 0);
+  const safeBalance = Math.max(0, Number(balance) || 0);
   const safeTripCost = Math.max(0, Number(tripCost) || 0);
-  const discount = Math.min(safeSaldo, safeTripCost);
+  const discount = Math.min(safeBalance, safeTripCost);
+  const balanceAfter = safeBalance - discount;
 
   return {
     discount,
-    pendingDebtAmount: safeTripCost - discount,
+    pendingAmount: safeTripCost - discount,
+    balanceAfter,
   };
 }
 
-function applyLocalCurrentAccountToTrip(
-  tenantId: string,
-  input: UpsertDistanceTripInput,
-): UpsertDistanceTripInput {
-  if (!input.companyId) {
-    return {
-      ...input,
-      currentAccountDiscount: 0,
-      pendingDebtAmount: input.cost,
-    };
-  }
+function getCompanyCreditBalance(company: Partial<Company>): number {
+  return Math.max(0, Number(company.creditBalance ?? company.credit_balance) || 0);
+}
 
-  const safeTenantId = ensureTenantId(tenantId);
-  const accountId = getCurrentAccountDocumentId(input.companyId);
-  const accounts = readLocalCollection<CurrentAccount>("currentAccounts", safeTenantId);
-  const account = accounts.find((item) => item.id === accountId);
+function withCompanyCreditAliases(input: UpsertCompanyInput): UpsertCompanyInput {
+  const hasCreditBalance =
+    input.creditBalance !== undefined || input.credit_balance !== undefined;
 
-  if (!account) {
-    return {
-      ...input,
-      currentAccountDiscount: 0,
-      pendingDebtAmount: input.cost,
-    };
-  }
+  if (!hasCreditBalance) return input;
 
-  const now = Timestamp.now();
-  const application = applyCurrentAccountBalance(account.saldo, input.cost);
-  const nextAccount: CurrentAccount = {
-    ...account,
-    saldo: account.saldo - application.discount,
-    updatedAt: now,
+  const creditBalance = Math.max(0, Number(input.creditBalance ?? input.credit_balance) || 0);
+
+  return {
+    ...input,
+    creditBalance,
+    credit_balance: creditBalance,
   };
+}
 
-  writeLocalCollection(
-    "currentAccounts",
+function getCurrentUserId(): string {
+  return auth?.currentUser?.uid ?? "system";
+}
+
+function createMovementInput({
+  tenantId,
+  companyId,
+  type,
+  amount,
+  balanceBefore,
+  balanceAfter,
+  tripId = null,
+  description,
+}: {
+  tenantId: string;
+  companyId: string;
+  type: CurrentAccountMovement["type"];
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  tripId?: string | null;
+  description: string;
+}): Omit<CurrentAccountMovement, "id"> {
+  const now = Timestamp.now();
+  const createdBy = getCurrentUserId();
+
+  return {
+    tenantId,
+    tenant_id: tenantId,
+    companyId,
+    company_id: companyId,
+    type,
+    amount,
+    balanceBefore,
+    balance_before: balanceBefore,
+    balanceAfter,
+    balance_after: balanceAfter,
+    tripId,
+    trip_id: tripId,
+    description,
+    createdAt: now,
+    created_at: now,
+    createdBy,
+    created_by: createdBy,
+  };
+}
+
+function applyLocalCompanyCreditToTrip<I extends { companyId?: string; cost: number }>(
+  tenantId: string,
+  collectionName: "hourRecords" | "distanceTrips",
+  input: I,
+  tripId: string,
+): I & {
+    currentAccountDiscount: number;
+    creditBalanceAfter: number;
+    credit_balance_after: number;
+    pendingAmount: number;
+  pending_amount: number;
+  pendingDebtAmount?: number;
+} {
+  const safeTenantId = ensureTenantId(tenantId);
+
+  if (!input.companyId) {
+    const pendingAmount = Math.max(0, Number(input.cost) || 0);
+    return {
+      ...input,
+      currentAccountDiscount: 0,
+      creditBalanceAfter: 0,
+      credit_balance_after: 0,
+      pendingAmount,
+      pending_amount: pendingAmount,
+      ...(collectionName === "distanceTrips" ? { pendingDebtAmount: pendingAmount } : {}),
+    };
+  }
+
+  const companies = readLocalCollection<Company>("companies", safeTenantId);
+  const company = companies.find((item) => item.id === input.companyId);
+  const balanceBefore = company ? getCompanyCreditBalance(company) : 0;
+  const application = applyCurrentAccountBalance(balanceBefore, input.cost);
+  const now = Timestamp.now();
+
+  if (company) {
+    writeLocalCollection(
+      "companies",
+      safeTenantId,
+      companies.map((item) =>
+        item.id === input.companyId
+          ? {
+              ...item,
+              creditBalance: application.balanceAfter,
+              credit_balance: application.balanceAfter,
+              updatedAt: now,
+              updated_at: now,
+            }
+          : item,
+      ),
+    );
+  }
+
+  const movementId = createLocalId();
+  const movement = {
+    id: movementId,
+    ...createMovementInput({
+      tenantId: safeTenantId,
+      companyId: input.companyId,
+      type: "trip_charge",
+      amount: application.discount,
+      balanceBefore,
+      balanceAfter: application.balanceAfter,
+      tripId,
+      description: `Descuento automatico por viaje ${collectionName === "hourRecords" ? "por hora" : "por km"}.`,
+    }),
+  };
+  const movements = readLocalCollection<CurrentAccountMovement>(
+    "current_account_movements",
     safeTenantId,
-    accounts.map((item) => (item.id === accountId ? nextAccount : item)),
   );
+  writeLocalCollection("current_account_movements", safeTenantId, [...movements, movement]);
 
   return {
     ...input,
     currentAccountDiscount: application.discount,
-    pendingDebtAmount: application.pendingDebtAmount,
+    creditBalanceAfter: application.balanceAfter,
+    credit_balance_after: application.balanceAfter,
+    pendingAmount: application.pendingAmount,
+    pending_amount: application.pendingAmount,
+    ...(collectionName === "distanceTrips" ? { pendingDebtAmount: application.pendingAmount } : {}),
   };
+}
+
+async function applyCompanyCreditInTransaction({
+  transaction,
+  firestore,
+  tenantId,
+  companyId,
+  tripId,
+  tripCost,
+  tripKind,
+}: {
+  transaction: Transaction;
+  firestore: ReturnType<typeof requireDb>;
+  tenantId: string;
+  companyId?: string;
+  tripId: string;
+  tripCost: number;
+  tripKind: "hour" | "km";
+}) {
+  if (!companyId) {
+    const pendingAmount = Math.max(0, Number(tripCost) || 0);
+    return {
+      currentAccountDiscount: 0,
+      pendingAmount,
+    };
+  }
+
+  const companyRef = doc(firestore, "companies", companyId);
+  const companySnapshot = await transaction.get(companyRef);
+
+  if (!companySnapshot.exists()) {
+    throw new Error("La empresa seleccionada no existe.");
+  }
+
+  const company = { id: companySnapshot.id, ...companySnapshot.data() } as Company;
+
+  if (company.tenantId !== tenantId) {
+    throw new Error("La empresa no pertenece al tenant activo.");
+  }
+
+  let legacyCreditBalance: number | null = null;
+  if (company.creditBalance === undefined && company.credit_balance === undefined) {
+    const legacyAccountRef = doc(
+      firestore,
+      "currentAccounts",
+      getCurrentAccountDocumentId(companyId),
+    );
+    const legacyAccountSnapshot = await transaction.get(legacyAccountRef);
+
+    if (legacyAccountSnapshot.exists()) {
+      const legacyAccount = {
+        id: legacyAccountSnapshot.id,
+        ...legacyAccountSnapshot.data(),
+      } as CurrentAccount;
+
+      if (legacyAccount.tenantId === tenantId) {
+        legacyCreditBalance = legacyAccount.saldo;
+      }
+    }
+  }
+
+  const now = Timestamp.now();
+  const balanceBefore = legacyCreditBalance ?? getCompanyCreditBalance(company);
+  const application = applyCurrentAccountBalance(balanceBefore, tripCost);
+
+  transaction.set(
+    companyRef,
+    {
+      creditBalance: application.balanceAfter,
+      credit_balance: application.balanceAfter,
+      updatedAt: now,
+      updated_at: now,
+    },
+    { merge: true },
+  );
+
+  const movementRef = doc(collection(firestore, "current_account_movements"));
+  transaction.set(
+    movementRef,
+    removeUndefinedFields({
+      ...createMovementInput({
+        tenantId,
+        companyId,
+        type: "trip_charge",
+        amount: application.discount,
+        balanceBefore,
+        balanceAfter: application.balanceAfter,
+        tripId,
+        description: `Descuento automatico por viaje ${tripKind === "hour" ? "por hora" : "por km"}.`,
+      }),
+    }),
+  );
+
+  return {
+    currentAccountDiscount: application.discount,
+    pendingAmount: application.pendingAmount,
+    balanceAfter: application.balanceAfter,
+  };
+}
+
+async function adjustCompanyCreditInTransaction({
+  transaction,
+  firestore,
+  tenantId,
+  companyId,
+  amount,
+  tripId,
+  description,
+}: {
+  transaction: Transaction;
+  firestore: ReturnType<typeof requireDb>;
+  tenantId: string;
+  companyId: string;
+  amount: number;
+  tripId: string;
+  description: string;
+}) {
+  const safeAmount = Math.max(0, Number(amount) || 0);
+  if (safeAmount <= 0) return;
+
+  const companyRef = doc(firestore, "companies", companyId);
+  const companySnapshot = await transaction.get(companyRef);
+
+  if (!companySnapshot.exists()) {
+    throw new Error("La empresa seleccionada no existe.");
+  }
+
+  const company = { id: companySnapshot.id, ...companySnapshot.data() } as Company;
+
+  if (company.tenantId !== tenantId) {
+    throw new Error("La empresa no pertenece al tenant activo.");
+  }
+
+  const now = Timestamp.now();
+  const balanceBefore = getCompanyCreditBalance(company);
+  const balanceAfter = balanceBefore + safeAmount;
+
+  transaction.set(
+    companyRef,
+    {
+      creditBalance: balanceAfter,
+      credit_balance: balanceAfter,
+      updatedAt: now,
+      updated_at: now,
+    },
+    { merge: true },
+  );
+
+  const movementRef = doc(collection(firestore, "current_account_movements"));
+  transaction.set(
+    movementRef,
+    removeUndefinedFields({
+      ...createMovementInput({
+        tenantId,
+        companyId,
+        type: "adjustment",
+        amount: safeAmount,
+        balanceBefore,
+        balanceAfter,
+        tripId,
+        description,
+      }),
+    }),
+  );
+}
+
+async function updateTripWithCreditInTransaction<I extends { companyId?: string; cost: number }>({
+  transaction,
+  firestore,
+  tenantId,
+  collectionName,
+  id,
+  input,
+  tripKind,
+  existing,
+  payload,
+}: {
+  transaction: Transaction;
+  firestore: ReturnType<typeof requireDb>;
+  tenantId: string;
+  collectionName: "hourRecords" | "distanceTrips";
+  id: string;
+  input: I;
+  tripKind: "hour" | "km";
+  existing: HourRecord | DistanceTrip;
+  payload: FirestorePayload;
+}) {
+  const oldCompanyId = existing.companyId;
+  const oldDiscount = Math.max(0, Number(existing.currentAccountDiscount) || 0);
+  const companyIds = [...new Set([oldCompanyId, input.companyId].filter(Boolean))] as string[];
+  const companyStates = new Map<
+    string,
+    {
+      ref: ReturnType<typeof doc>;
+      company: Company;
+      balance: number;
+    }
+  >();
+
+  for (const companyId of companyIds) {
+    const companyRef = doc(firestore, "companies", companyId);
+    const companySnapshot = await transaction.get(companyRef);
+
+    if (!companySnapshot.exists()) {
+      throw new Error("La empresa seleccionada no existe.");
+    }
+
+    const company = { id: companySnapshot.id, ...companySnapshot.data() } as Company;
+    if (company.tenantId !== tenantId) {
+      throw new Error("La empresa no pertenece al tenant activo.");
+    }
+
+    companyStates.set(companyId, {
+      ref: companyRef,
+      company,
+      balance: getCompanyCreditBalance(company),
+    });
+  }
+
+  const now = Timestamp.now();
+
+  if (oldCompanyId && oldDiscount > 0) {
+    const state = companyStates.get(oldCompanyId);
+    if (state) {
+      const balanceBefore = state.balance;
+      state.balance += oldDiscount;
+      const movementRef = doc(collection(firestore, "current_account_movements"));
+      transaction.set(
+        movementRef,
+        removeUndefinedFields({
+          ...createMovementInput({
+            tenantId,
+            companyId: oldCompanyId,
+            type: "adjustment",
+            amount: oldDiscount,
+            balanceBefore,
+            balanceAfter: state.balance,
+            tripId: id,
+            description: `Reversion de descuento por edicion de viaje ${tripKind === "hour" ? "por hora" : "por km"}.`,
+          }),
+        }),
+      );
+    }
+  }
+
+  let currentAccountDiscount = 0;
+  let pendingAmount = Math.max(0, Number(input.cost) || 0);
+  let balanceAfter = 0;
+
+  if (input.companyId) {
+    const state = companyStates.get(input.companyId);
+    if (!state) {
+      throw new Error("La empresa seleccionada no existe.");
+    }
+
+    const application = applyCurrentAccountBalance(state.balance, input.cost);
+    const balanceBefore = state.balance;
+    state.balance = application.balanceAfter;
+    currentAccountDiscount = application.discount;
+    pendingAmount = application.pendingAmount;
+    balanceAfter = application.balanceAfter;
+
+    const movementRef = doc(collection(firestore, "current_account_movements"));
+    transaction.set(
+      movementRef,
+      removeUndefinedFields({
+        ...createMovementInput({
+          tenantId,
+          companyId: input.companyId,
+          type: "trip_charge",
+          amount: application.discount,
+          balanceBefore,
+          balanceAfter: application.balanceAfter,
+          tripId: id,
+          description: `Descuento automatico por edicion de viaje ${tripKind === "hour" ? "por hora" : "por km"}.`,
+        }),
+      }),
+    );
+  }
+
+  for (const state of companyStates.values()) {
+    transaction.set(
+      state.ref,
+      {
+        creditBalance: state.balance,
+        credit_balance: state.balance,
+        updatedAt: now,
+        updated_at: now,
+      },
+      { merge: true },
+    );
+  }
+
+  transaction.set(
+    doc(firestore, collectionName, id),
+    removeUndefinedFields({
+      ...payload,
+      currentAccountDiscount,
+      creditBalanceAfter: balanceAfter,
+      credit_balance_after: balanceAfter,
+      pendingAmount,
+      pending_amount: pendingAmount,
+      ...(collectionName === "distanceTrips" ? { pendingDebtAmount: pendingAmount } : {}),
+    }),
+    { merge: true },
+  );
 }
 
 async function listByTenant<T extends TenantEntity>(
@@ -288,7 +702,31 @@ async function removeByTenant(
 }
 
 export async function listCompanies(tenantId: string): Promise<Company[]> {
-  return listByTenant<Company>("companies", tenantId, "name");
+  const safeTenantId = ensureTenantId(tenantId);
+  const companies = await listByTenant<Company>("companies", safeTenantId, "name");
+  const legacyAccounts = await listByTenant<CurrentAccount>(
+    "currentAccounts",
+    safeTenantId,
+    "updatedAt",
+  );
+  const legacyBalanceByCompany = new Map(
+    legacyAccounts.map((account) => [account.companyId, account.saldo]),
+  );
+
+  return companies.map((company) => {
+    if (company.creditBalance !== undefined || company.credit_balance !== undefined) {
+      return company;
+    }
+
+    const legacyBalance = legacyBalanceByCompany.get(company.id);
+    if (legacyBalance === undefined) return company;
+
+    return {
+      ...company,
+      creditBalance: legacyBalance,
+      credit_balance: legacyBalance,
+    };
+  });
 }
 
 export async function getCompany(id: string, tenantId: string): Promise<Company | null> {
@@ -302,22 +740,24 @@ export async function saveCompany(
 ): Promise<string> {
   const safeTenantId = ensureTenantId(tenantId);
   const now = Timestamp.now();
+  const normalizedInput = withCompanyCreditAliases(input);
   const payload = removeUndefinedFields({
-    ...input,
+    ...normalizedInput,
     tenantId: safeTenantId,
     updatedAt: now,
+    updated_at: now,
     ...(id ? {} : { createdAt: now }),
   });
 
   if (isDemoMode()) {
-    return saveDemoEntity<Company>("companies", safeTenantId, input, id);
+    return saveDemoEntity<Company>("companies", safeTenantId, normalizedInput, id);
   }
 
   if (!db) {
     return saveLocalEntity<Company, UpsertCompanyInput>(
       "companies",
       safeTenantId,
-      input,
+      normalizedInput,
       id,
     );
   }
@@ -335,6 +775,141 @@ export async function saveCompany(
 
 export async function deleteCompany(id: string, tenantId: string): Promise<void> {
   await removeByTenant("companies", id, tenantId);
+}
+
+export async function addCompanyCredit(
+  tenantId: string,
+  companyId: string,
+  amount: number,
+  description = "Pago adelantado manual.",
+): Promise<void> {
+  const safeTenantId = ensureTenantId(tenantId);
+  const safeAmount = Number(amount) || 0;
+
+  if (safeAmount <= 0) {
+    throw new Error("Ingresa un importe de pago adelantado mayor a cero.");
+  }
+
+  if (isDemoMode()) {
+    const company = getDemoEntity<Company>("companies", safeTenantId, companyId);
+    if (!company) throw new Error("La empresa seleccionada no existe.");
+    const balanceBefore = getCompanyCreditBalance(company);
+    const balanceAfter = balanceBefore + safeAmount;
+    saveDemoEntity<Company>(
+      "companies",
+      safeTenantId,
+      {
+        ...company,
+        creditBalance: balanceAfter,
+        credit_balance: balanceAfter,
+      },
+      companyId,
+    );
+    saveDemoEntity<CurrentAccountMovement>(
+      "current_account_movements",
+      safeTenantId,
+      createMovementInput({
+        tenantId: safeTenantId,
+        companyId,
+        type: "credit",
+        amount: safeAmount,
+        balanceBefore,
+        balanceAfter,
+        description,
+      }),
+    );
+    return;
+  }
+
+  if (!db) {
+    const companies = readLocalCollection<Company>("companies", safeTenantId);
+    const company = companies.find((item) => item.id === companyId);
+    if (!company) throw new Error("La empresa seleccionada no existe.");
+    const now = Timestamp.now();
+    const balanceBefore = getCompanyCreditBalance(company);
+    const balanceAfter = balanceBefore + safeAmount;
+
+    writeLocalCollection(
+      "companies",
+      safeTenantId,
+      companies.map((item) =>
+        item.id === companyId
+          ? {
+              ...item,
+              creditBalance: balanceAfter,
+              credit_balance: balanceAfter,
+              updatedAt: now,
+              updated_at: now,
+            }
+          : item,
+      ),
+    );
+
+    const movement = {
+      id: createLocalId(),
+      ...createMovementInput({
+        tenantId: safeTenantId,
+        companyId,
+        type: "credit",
+        amount: safeAmount,
+        balanceBefore,
+        balanceAfter,
+        description,
+      }),
+    };
+    const movements = readLocalCollection<CurrentAccountMovement>(
+      "current_account_movements",
+      safeTenantId,
+    );
+    writeLocalCollection("current_account_movements", safeTenantId, [...movements, movement]);
+    return;
+  }
+
+  const firestore = requireDb();
+  await runTransaction(firestore, async (transaction) => {
+    const companyRef = doc(firestore, "companies", companyId);
+    const companySnapshot = await transaction.get(companyRef);
+
+    if (!companySnapshot.exists()) {
+      throw new Error("La empresa seleccionada no existe.");
+    }
+
+    const company = { id: companySnapshot.id, ...companySnapshot.data() } as Company;
+    if (company.tenantId !== safeTenantId) {
+      throw new Error("La empresa no pertenece al tenant activo.");
+    }
+
+    const now = Timestamp.now();
+    const balanceBefore = getCompanyCreditBalance(company);
+    const balanceAfter = balanceBefore + safeAmount;
+
+    transaction.set(
+      companyRef,
+      {
+        creditBalance: balanceAfter,
+        credit_balance: balanceAfter,
+        updatedAt: now,
+        updated_at: now,
+      },
+      { merge: true },
+    );
+
+    const movementRef = doc(collection(firestore, "current_account_movements"));
+    transaction.set(
+      movementRef,
+      removeUndefinedFields({
+        ...createMovementInput({
+          tenantId: safeTenantId,
+          companyId,
+          type: "credit",
+          amount: safeAmount,
+          balanceBefore,
+          balanceAfter,
+          description,
+        }),
+      }),
+    );
+  });
 }
 
 export async function listCurrentAccounts(tenantId: string): Promise<CurrentAccount[]> {
@@ -455,6 +1030,17 @@ export async function listHourRecords(
 ): Promise<HourRecord[]> {
   const safeTenantId = ensureTenantId(tenantId);
 
+  if (isDemoMode()) {
+    return listDemoEntities<HourRecord>("hourRecords", safeTenantId, "date")
+      .filter((record) => {
+        if (filters?.employeeId && record.employeeId !== filters.employeeId) return false;
+        if (filters?.from && record.date < filters.from) return false;
+        if (filters?.to && record.date > filters.to) return false;
+        return true;
+      })
+      .slice(0, 250);
+  }
+
   if (!db) {
     return readLocalCollection<HourRecord>("hourRecords", safeTenantId)
       .filter((record) => {
@@ -498,31 +1084,124 @@ export async function saveHourRecord(
   });
 
   if (isDemoMode()) {
-    return saveDemoEntity<HourRecord>("hourRecords", safeTenantId, input, id);
+    return saveDemoEntity<HourRecord>(
+      "hourRecords",
+      safeTenantId,
+      id ? input : applyDemoCompanyCreditToTrip(safeTenantId, "hourRecords", input),
+      id,
+    );
   }
 
   if (!db) {
+    const nextId = id ?? createLocalId();
     return saveLocalEntity<HourRecord, UpsertHourRecordInput>(
       "hourRecords",
       safeTenantId,
-      input,
-      id,
+      id ? input : applyLocalCompanyCreditToTrip(safeTenantId, "hourRecords", input, nextId),
+      nextId,
     );
   }
 
   const firestore = requireDb();
 
   if (id) {
-    await setDoc(doc(firestore, "hourRecords", id), payload, { merge: true });
+    const recordRef = doc(firestore, "hourRecords", id);
+    await runTransaction(firestore, async (transaction) => {
+      const recordSnapshot = await transaction.get(recordRef);
+
+      if (!recordSnapshot.exists()) {
+        throw new Error("No se encontro el registro en el tenant activo.");
+      }
+
+      const existing = { id: recordSnapshot.id, ...recordSnapshot.data() } as HourRecord;
+      if (existing.tenantId !== safeTenantId) {
+        throw new Error("No se encontro el registro en el tenant activo.");
+      }
+
+      await updateTripWithCreditInTransaction({
+        transaction,
+        firestore,
+        tenantId: safeTenantId,
+        collectionName: "hourRecords",
+        id,
+        input,
+        tripKind: "hour",
+        existing,
+        payload,
+      });
+    });
     return id;
   }
 
-  const created = await addDoc(collection(firestore, "hourRecords"), payload);
-  return created.id;
+  const createdRef = doc(collection(firestore, "hourRecords"));
+
+  await runTransaction(firestore, async (transaction) => {
+    const application = await applyCompanyCreditInTransaction({
+      transaction,
+      firestore,
+      tenantId: safeTenantId,
+      companyId: input.companyId,
+      tripId: createdRef.id,
+      tripCost: input.cost,
+      tripKind: "hour",
+    });
+
+    transaction.set(
+      createdRef,
+      removeUndefinedFields({
+        ...input,
+        tenantId: safeTenantId,
+        currentAccountDiscount: application.currentAccountDiscount,
+        creditBalanceAfter: application.balanceAfter,
+        credit_balance_after: application.balanceAfter,
+        pendingAmount: application.pendingAmount,
+        pending_amount: application.pendingAmount,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
+  });
+
+  return createdRef.id;
 }
 
 export async function deleteHourRecord(id: string, tenantId: string): Promise<void> {
-  await removeByTenant("hourRecords", id, tenantId);
+  const safeTenantId = ensureTenantId(tenantId);
+
+  if (isDemoMode() || !db) {
+    await removeByTenant("hourRecords", id, safeTenantId);
+    return;
+  }
+
+  const firestore = requireDb();
+  const recordRef = doc(firestore, "hourRecords", id);
+
+  await runTransaction(firestore, async (transaction) => {
+    const recordSnapshot = await transaction.get(recordRef);
+
+    if (!recordSnapshot.exists()) {
+      throw new Error("No se encontro el registro en el tenant activo.");
+    }
+
+    const existing = { id: recordSnapshot.id, ...recordSnapshot.data() } as HourRecord;
+    if (existing.tenantId !== safeTenantId) {
+      throw new Error("No se encontro el registro en el tenant activo.");
+    }
+
+    if (existing.companyId) {
+      await adjustCompanyCreditInTransaction({
+        transaction,
+        firestore,
+        tenantId: safeTenantId,
+        companyId: existing.companyId,
+        amount: existing.currentAccountDiscount ?? 0,
+        tripId: id,
+        description: "Reversion de descuento por eliminacion de viaje por hora.",
+      });
+    }
+
+    transaction.delete(recordRef);
+  });
 }
 
 export async function listDistanceTrips(tenantId: string): Promise<DistanceTrip[]> {
@@ -547,73 +1226,76 @@ export async function saveDistanceTrip(
     return saveDemoEntity<DistanceTrip>(
       "distanceTrips",
       safeTenantId,
-      id ? input : applyDemoCurrentAccountToDistanceTrip(safeTenantId, input),
+      id ? input : applyDemoCompanyCreditToTrip(safeTenantId, "distanceTrips", input),
       id,
     );
   }
 
   if (!db) {
+    const nextId = id ?? createLocalId();
     return saveLocalEntity<DistanceTrip, UpsertDistanceTripInput>(
       "distanceTrips",
       safeTenantId,
-      id ? input : applyLocalCurrentAccountToTrip(safeTenantId, input),
-      id,
+      id ? input : applyLocalCompanyCreditToTrip(safeTenantId, "distanceTrips", input, nextId),
+      nextId,
     );
   }
 
   const firestore = requireDb();
 
   if (id) {
-    await setDoc(doc(firestore, "distanceTrips", id), payload, { merge: true });
+    const tripRef = doc(firestore, "distanceTrips", id);
+    await runTransaction(firestore, async (transaction) => {
+      const tripSnapshot = await transaction.get(tripRef);
+
+      if (!tripSnapshot.exists()) {
+        throw new Error("No se encontro el registro en el tenant activo.");
+      }
+
+      const existing = { id: tripSnapshot.id, ...tripSnapshot.data() } as DistanceTrip;
+      if (existing.tenantId !== safeTenantId) {
+        throw new Error("No se encontro el registro en el tenant activo.");
+      }
+
+      await updateTripWithCreditInTransaction({
+        transaction,
+        firestore,
+        tenantId: safeTenantId,
+        collectionName: "distanceTrips",
+        id,
+        input,
+        tripKind: "km",
+        existing,
+        payload,
+      });
+    });
     return id;
   }
 
   const createdRef = doc(collection(firestore, "distanceTrips"));
 
   await runTransaction(firestore, async (transaction) => {
-    let currentAccountDiscount = 0;
-    let pendingDebtAmount = input.cost;
-
-    if (input.companyId) {
-      const currentAccountRef = doc(
-        firestore,
-        "currentAccounts",
-        getCurrentAccountDocumentId(input.companyId),
-      );
-      const currentAccountSnapshot = await transaction.get(currentAccountRef);
-
-      if (currentAccountSnapshot.exists()) {
-        const currentAccount = {
-          id: currentAccountSnapshot.id,
-          ...currentAccountSnapshot.data(),
-        } as CurrentAccount;
-
-        if (currentAccount.tenantId !== safeTenantId) {
-          throw new Error("La cuenta corriente no pertenece al tenant activo.");
-        }
-
-        const application = applyCurrentAccountBalance(currentAccount.saldo, input.cost);
-        currentAccountDiscount = application.discount;
-        pendingDebtAmount = application.pendingDebtAmount;
-
-        transaction.set(
-          currentAccountRef,
-          {
-            saldo: currentAccount.saldo - currentAccountDiscount,
-            updatedAt: now,
-          },
-          { merge: true },
-        );
-      }
-    }
+    const application = await applyCompanyCreditInTransaction({
+      transaction,
+      firestore,
+      tenantId: safeTenantId,
+      companyId: input.companyId,
+      tripId: createdRef.id,
+      tripCost: input.cost,
+      tripKind: "km",
+    });
 
     transaction.set(
       createdRef,
       removeUndefinedFields({
         ...input,
         tenantId: safeTenantId,
-        currentAccountDiscount,
-        pendingDebtAmount,
+        currentAccountDiscount: application.currentAccountDiscount,
+        creditBalanceAfter: application.balanceAfter,
+        credit_balance_after: application.balanceAfter,
+        pendingAmount: application.pendingAmount,
+        pending_amount: application.pendingAmount,
+        pendingDebtAmount: application.pendingAmount,
         createdAt: now,
         updatedAt: now,
       }),
@@ -624,5 +1306,40 @@ export async function saveDistanceTrip(
 }
 
 export async function deleteDistanceTrip(id: string, tenantId: string): Promise<void> {
-  await removeByTenant("distanceTrips", id, tenantId);
+  const safeTenantId = ensureTenantId(tenantId);
+
+  if (isDemoMode() || !db) {
+    await removeByTenant("distanceTrips", id, safeTenantId);
+    return;
+  }
+
+  const firestore = requireDb();
+  const tripRef = doc(firestore, "distanceTrips", id);
+
+  await runTransaction(firestore, async (transaction) => {
+    const tripSnapshot = await transaction.get(tripRef);
+
+    if (!tripSnapshot.exists()) {
+      throw new Error("No se encontro el registro en el tenant activo.");
+    }
+
+    const existing = { id: tripSnapshot.id, ...tripSnapshot.data() } as DistanceTrip;
+    if (existing.tenantId !== safeTenantId) {
+      throw new Error("No se encontro el registro en el tenant activo.");
+    }
+
+    if (existing.companyId) {
+      await adjustCompanyCreditInTransaction({
+        transaction,
+        firestore,
+        tenantId: safeTenantId,
+        companyId: existing.companyId,
+        amount: existing.currentAccountDiscount ?? 0,
+        tripId: id,
+        description: "Reversion de descuento por eliminacion de viaje por km.",
+      });
+    }
+
+    transaction.delete(tripRef);
+  });
 }

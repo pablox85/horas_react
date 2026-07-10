@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2, UserCheck, UserX } from "lucide-react";
+import { CheckCircle2, Pencil, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextInput } from "@/components/ui/field";
@@ -29,6 +29,8 @@ export default function EmployeesPage() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmationMessage, setConfirmationMessage] = useState("");
+  const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
 
   const companyName = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
@@ -58,6 +60,7 @@ export default function EmployeesPage() {
 
     try {
       setSubmitting(true);
+      const isEditing = Boolean(editingId);
       await measureAsync(
         "employees.save.total",
         async () => {
@@ -77,10 +80,12 @@ export default function EmployeesPage() {
           );
           setForm(emptyForm);
           setEditingId(null);
+          setIsEmployeeModalOpen(false);
           await measureAsync("employees.refresh.afterSave", refresh);
         },
         { mode: editingId ? "edit" : "create" },
       );
+      setConfirmationMessage(isEditing ? "Empleado editado" : "Empleado agregado");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar el empleado.");
     } finally {
@@ -98,66 +103,95 @@ export default function EmployeesPage() {
       companyId: employee.companyId ?? "",
       active: employee.active,
     });
+    setIsEmployeeModalOpen(true);
   }
 
   async function handleDelete(id: string) {
-    if (!tenantId || !window.confirm("Eliminar empleado?")) return;
+    if (!tenantId) return;
     setDeletingId(id);
     try {
       await measureAsync("employees.delete.total", async () => {
         await measureAsync("employees.delete.write", () => deleteEmployee(id, tenantId));
         await measureAsync("employees.refresh.afterDelete", refresh);
       });
+      setConfirmationMessage("Empleado eliminado");
     } finally {
       setDeletingId(null);
     }
   }
 
+  function resetFormState() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setError("");
+  }
+
+  function openCreateEmployeeModal() {
+    resetFormState();
+    setIsEmployeeModalOpen(true);
+  }
+
+  const employeeForm = (
+    <form className="grid gap-4" onSubmit={handleSubmit}>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+        <Field label="Nombre">
+          <TextInput required value={form.firstName} onChange={(event) => setForm({ ...form, firstName: event.target.value })} />
+        </Field>
+        <Field label="Apellido">
+          <TextInput required value={form.lastName} onChange={(event) => setForm({ ...form, lastName: event.target.value })} />
+        </Field>
+      </div>
+      <Field label="Email">
+        <TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+      </Field>
+      <Field label="Rol">
+        <TextInput value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} />
+      </Field>
+      <Field label="Empresa">
+        <SelectInput value={form.companyId} onChange={(event) => setForm({ ...form, companyId: event.target.value })}>
+          <option value="">Sin empresa</option>
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>{company.name}</option>
+          ))}
+        </SelectInput>
+      </Field>
+      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+        <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
+        Activo
+      </label>
+      {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      <div className="flex gap-2">
+        <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>
+          {submitting ? "Guardando..." : editingId ? "Actualizar" : "Crear"}
+        </Button>
+        {editingId ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              resetFormState();
+              setIsEmployeeModalOpen(false);
+            }}
+          >
+            Cancelar
+          </Button>
+        ) : null}
+      </div>
+    </form>
+  );
+
   return (
     <ProtectedPage>
-      <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-4 text-xl font-bold">{editingId ? "Editar empleado" : "Alta de empleado"}</h2>
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-              <Field label="Nombre">
-                <TextInput required value={form.firstName} onChange={(event) => setForm({ ...form, firstName: event.target.value })} />
-              </Field>
-              <Field label="Apellido">
-                <TextInput required value={form.lastName} onChange={(event) => setForm({ ...form, lastName: event.target.value })} />
-              </Field>
-            </div>
-            <Field label="Email">
-              <TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
-            </Field>
-            <Field label="Rol">
-              <TextInput value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} />
-            </Field>
-            <Field label="Empresa">
-              <SelectInput value={form.companyId} onChange={(event) => setForm({ ...form, companyId: event.target.value })}>
-                <option value="">Sin empresa</option>
-                {companies.map((company) => (
-                  <option key={company.id} value={company.id}>{company.name}</option>
-                ))}
-              </SelectInput>
-            </Field>
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-              <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
-              Activo
-            </label>
-            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-            <div className="flex gap-2">
-              <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>
-                {submitting ? "Guardando..." : editingId ? "Actualizar" : "Crear"}
-              </Button>
-              {editingId ? (
-                <Button type="button" variant="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>
-                  Cancelar
-                </Button>
-              ) : null}
-            </div>
-          </form>
-        </section>
+      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:hidden">
+          <h2 className="text-lg font-bold">Alta de empleado</h2>
+          <Button
+            type="button"
+            aria-label="Alta de empleado"
+            icon={<Plus className="h-4 w-4" />}
+            onClick={openCreateEmployeeModal}
+          />
+        </div>
 
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="border-b border-slate-200 p-5 dark:border-slate-800">
@@ -239,7 +273,45 @@ export default function EmployeesPage() {
             </table>
           </div>
         </section>
+
+        <section className="hidden rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:block">
+          <h2 className="mb-4 text-xl font-bold">{editingId ? "Editar empleado" : "Alta de empleado"}</h2>
+          {employeeForm}
+        </section>
       </div>
+      {isEmployeeModalOpen ? (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 px-4 py-5 lg:hidden">
+          <div className="mx-auto flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <h2 className="text-lg font-bold">{editingId ? "Editar empleado" : "Alta de empleado"}</h2>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setIsEmployeeModalOpen(false);
+                  resetFormState();
+                }}
+              >
+                Cerrar
+              </Button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {employeeForm}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {confirmationMessage ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-ocean" />
+            <p className="text-xl font-bold">{confirmationMessage}</p>
+            <Button type="button" className="mt-5 w-full justify-center" onClick={() => setConfirmationMessage("")}>
+              Aceptar
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </ProtectedPage>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { Button } from "@/components/ui/button";
 import { Field, SelectInput, TextareaInput, TextInput } from "@/components/ui/field";
@@ -30,6 +30,7 @@ interface HourForm {
   date: string;
   hours: number;
   minutes: number;
+  manualCost: number;
   notes: string;
 }
 
@@ -39,6 +40,7 @@ const emptyForm: HourForm = {
   date: formatISODate(new Date()),
   hours: 0,
   minutes: 0,
+  manualCost: 0,
   notes: "",
 };
 
@@ -61,6 +63,8 @@ export default function HoursPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState("");
+  const [isHoursModalOpen, setIsHoursModalOpen] = useState(false);
   const timerStartRef = useRef<number | null>(null);
 
   const activeEmployees = employees.filter((employee) => employee.active);
@@ -93,8 +97,10 @@ export default function HoursPage() {
         (acc, record) => ({
           hours: acc.hours + record.hoursWorked,
           cost: acc.cost + record.cost,
+          discount: acc.discount + (record.currentAccountDiscount ?? 0),
+          pending: acc.pending + (record.pendingAmount ?? record.pending_amount ?? 0),
         }),
-        { hours: 0, cost: 0 },
+        { hours: 0, cost: 0, discount: 0, pending: 0 },
       ),
     [visibleRecords],
   );
@@ -162,25 +168,33 @@ export default function HoursPage() {
       minutes: Number(form.minutes) || 0,
       timerSeconds,
     });
+    const manualCost = Number(form.manualCost) || 0;
 
-    if (!form.employeeId || !form.date || totalHours === null) {
-      setError("Selecciona empleado, fecha y un tiempo valido.");
+    if (!form.employeeId || !form.date || (manualCost <= 0 && totalHours === null)) {
+      setError("Selecciona empleado, fecha y un tiempo o importe valido.");
       return;
     }
 
     const selectedCompany = form.companyId ? companyById.get(form.companyId) : null;
+    const hoursWorked = totalHours ?? 0;
     const input: UpsertHourRecordInput = {
       employeeId: form.employeeId,
       companyId: form.companyId || undefined,
       date: form.date,
-      hoursWorked: totalHours,
+      hoursWorked,
       notes: form.notes.trim() || undefined,
-      cost: calculateCost(totalHours, selectedCompany?.hourlyRate ?? DEFAULT_HOURLY_RATE),
+      cost:
+        manualCost > 0
+          ? manualCost
+          : calculateCost(hoursWorked, selectedCompany?.hourlyRate ?? DEFAULT_HOURLY_RATE),
+      costMode: manualCost > 0 ? "manual" : "calculated",
+      manualCost: manualCost > 0 ? manualCost : undefined,
       source: mode,
     };
 
     try {
       setSubmitting(true);
+      const isEditing = Boolean(editingId);
       await measureAsync(
         "hours.save.total",
         async () => {
@@ -189,12 +203,14 @@ export default function HoursPage() {
           );
           setForm(emptyForm);
           setEditingId(null);
+          setIsHoursModalOpen(false);
           setTimerSeconds(0);
           stopTimer();
           await measureAsync("hours.refresh.afterSave", refresh);
         },
         { mode: editingId ? "edit" : "create" },
       );
+      setConfirmationMessage(isEditing ? "Viaje por hora editado" : "Viaje por hora agregado");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar el registro.");
     } finally {
@@ -213,18 +229,32 @@ export default function HoursPage() {
       date: record.date,
       hours,
       minutes,
+      manualCost: record.costMode === "manual" ? record.manualCost ?? record.cost : 0,
       notes: record.notes ?? "",
     });
+    setIsHoursModalOpen(true);
+  }
+
+  function resetFormState() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setError("");
+  }
+
+  function openCreateHoursModal() {
+    resetFormState();
+    setIsHoursModalOpen(true);
   }
 
   async function handleDelete(id: string) {
-    if (!tenantId || !window.confirm("Eliminar registro de horas?")) return;
+    if (!tenantId) return;
     setDeletingId(id);
     try {
       await measureAsync("hours.delete.total", async () => {
         await measureAsync("hours.delete.write", () => deleteHourRecord(id, tenantId));
         await measureAsync("hours.refresh.afterDelete", refresh);
       });
+      setConfirmationMessage("Viaje por hora eliminado");
     } finally {
       setDeletingId(null);
     }
@@ -242,72 +272,109 @@ export default function HoursPage() {
     }
   }
 
+  const hoursForm = (
+    <form className="grid gap-4" onSubmit={handleSubmit}>
+      <Field label="Empleado">
+        <SelectInput required value={form.employeeId} onChange={(event) => setForm({ ...form, employeeId: event.target.value })}>
+          <option value="">Seleccionar</option>
+          {activeEmployees.map((employee) => (
+            <option key={employee.id} value={employee.id}>{employee.firstName} {employee.lastName}</option>
+          ))}
+        </SelectInput>
+      </Field>
+      <Field label="Empresa">
+        <SelectInput value={form.companyId} onChange={(event) => setForm({ ...form, companyId: event.target.value })}>
+          <option value="">Sin empresa</option>
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>{company.name}</option>
+          ))}
+        </SelectInput>
+      </Field>
+      <Field label="Fecha">
+        <TextInput required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
+      </Field>
+
+      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+        <button type="button" onClick={() => setMode("manual")} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "manual" ? "bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white" : "text-slate-500"}`}>Manual</button>
+        <button type="button" onClick={() => setMode("timer")} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "timer" ? "bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white" : "text-slate-500"}`}>Timer</button>
+      </div>
+
+      {mode === "manual" ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Horas">
+            <TextInput type="number" min="0" value={form.hours || ""} onChange={(event) => setForm({ ...form, hours: Number(event.target.value) || 0 })} />
+          </Field>
+          <Field label="Minutos">
+            <TextInput type="number" min="0" max="59" value={form.minutes || ""} onChange={(event) => setForm({ ...form, minutes: Number(event.target.value) || 0 })} />
+          </Field>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-slate-200 p-4 text-center dark:border-slate-800">
+          <p className="font-mono text-4xl font-bold">{formatTime(timerSeconds)}</p>
+          <div className="mt-4 flex justify-center gap-2">
+            {isTimerRunning ? (
+              <Button type="button" variant="danger" icon={<Square className="h-4 w-4" />} onClick={stopTimer}>Detener</Button>
+            ) : (
+              <Button type="button" icon={<Play className="h-4 w-4" />} onClick={startTimer}>Iniciar</Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Field label="Importe manual">
+        <TextInput
+          min="0"
+          step="0.01"
+          type="number"
+          value={form.manualCost || ""}
+          onChange={(event) =>
+            setForm({ ...form, manualCost: Number(event.target.value) || 0 })
+          }
+        />
+      </Field>
+
+      <Field label="Notas">
+        <TextareaInput value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
+      </Field>
+      {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>{submitting ? "Guardando..." : editingId ? "Actualizar" : "Guardar"}</Button>
+        {editingId ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              resetFormState();
+              setIsHoursModalOpen(false);
+            }}
+          >
+            Cancelar
+          </Button>
+        ) : null}
+      </div>
+    </form>
+  );
+
   return (
     <ProtectedPage>
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:hidden">
+          <h2 className="text-lg font-bold">Registrar horas</h2>
+          <Button
+            type="button"
+            aria-label="Registrar horas"
+            icon={<Plus className="h-4 w-4" />}
+            onClick={openCreateHoursModal}
+          />
+        </div>
+
+        <section className="hidden rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:block">
           <h2 className="mb-4 text-xl font-bold">{editingId ? "Editar horas" : "Registrar horas"}</h2>
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            <Field label="Empleado">
-              <SelectInput required value={form.employeeId} onChange={(event) => setForm({ ...form, employeeId: event.target.value })}>
-                <option value="">Seleccionar</option>
-                {activeEmployees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>{employee.firstName} {employee.lastName}</option>
-                ))}
-              </SelectInput>
-            </Field>
-            <Field label="Empresa">
-              <SelectInput value={form.companyId} onChange={(event) => setForm({ ...form, companyId: event.target.value })}>
-                <option value="">Sin empresa</option>
-                {companies.map((company) => (
-                  <option key={company.id} value={company.id}>{company.name}</option>
-                ))}
-              </SelectInput>
-            </Field>
-            <Field label="Fecha">
-              <TextInput required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
-            </Field>
-
-            <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
-              <button type="button" onClick={() => setMode("manual")} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "manual" ? "bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white" : "text-slate-500"}`}>Manual</button>
-              <button type="button" onClick={() => setMode("timer")} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "timer" ? "bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white" : "text-slate-500"}`}>Timer</button>
-            </div>
-
-            {mode === "manual" ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Horas">
-                  <TextInput type="number" min="0" value={form.hours || ""} onChange={(event) => setForm({ ...form, hours: Number(event.target.value) || 0 })} />
-                </Field>
-                <Field label="Minutos">
-                  <TextInput type="number" min="0" max="59" value={form.minutes || ""} onChange={(event) => setForm({ ...form, minutes: Number(event.target.value) || 0 })} />
-                </Field>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-slate-200 p-4 text-center dark:border-slate-800">
-                <p className="font-mono text-4xl font-bold">{formatTime(timerSeconds)}</p>
-                <div className="mt-4 flex justify-center gap-2">
-                  {isTimerRunning ? (
-                    <Button type="button" variant="danger" icon={<Square className="h-4 w-4" />} onClick={stopTimer}>Detener</Button>
-                  ) : (
-                    <Button type="button" icon={<Play className="h-4 w-4" />} onClick={startTimer}>Iniciar</Button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <Field label="Notas">
-              <TextareaInput value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
-            </Field>
-            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" icon={<Plus className="h-4 w-4" />} disabled={submitting}>{submitting ? "Guardando..." : editingId ? "Actualizar" : "Guardar"}</Button>
-              {editingId ? <Button type="button" variant="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>Cancelar</Button> : null}
-            </div>
-          </form>
+          {hoursForm}
         </section>
 
         <section className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
             <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <p className="text-sm text-slate-500">Horas filtradas</p>
               <p className="text-3xl font-bold">{formatDisplayTime(totals.hours)}</p>
@@ -319,6 +386,11 @@ export default function HoursPage() {
             <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <p className="text-sm text-slate-500">Registros</p>
               <p className="text-3xl font-bold">{visibleRecords.length}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-sm text-slate-500">Descontado / pendiente</p>
+              <p className="text-xl font-bold">{formatCurrency(totals.discount)}</p>
+              <p className="text-sm text-slate-500">Pendiente: {formatCurrency(totals.pending)}</p>
             </div>
           </div>
 
@@ -362,6 +434,7 @@ export default function HoursPage() {
                       Empresa: {record.companyId ? companyName.get(record.companyId) ?? "Empresa no encontrada" : "-"}
                     </span>
                     <span>{formatDisplayTime(record.hoursWorked)}</span>
+                    <span>Saldo: {formatCurrency(record.creditBalanceAfter ?? record.credit_balance_after ?? 0)}</span>
                     {record.notes ? <span className="break-words">{record.notes}</span> : null}
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-2">
@@ -386,13 +459,14 @@ export default function HoursPage() {
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Horas</th>
                   <th className="px-4 py-3">Costo</th>
+                  <th className="px-4 py-3">Saldo</th>
                   <th className="px-4 py-3">Notas</th>
                   <th className="px-4 py-3 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRecords.length === 0 ? (
-                  <tr><td className="px-4 py-6 text-slate-500" colSpan={7}>No hay registros para mostrar.</td></tr>
+                  <tr><td className="px-4 py-6 text-slate-500" colSpan={8}>No hay registros para mostrar.</td></tr>
                 ) : visibleRecords.map((record) => (
                   <tr key={record.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-4 py-3">{record.date}</td>
@@ -402,6 +476,9 @@ export default function HoursPage() {
                     </td>
                     <td className="px-4 py-3">{formatDisplayTime(record.hoursWorked)}</td>
                     <td className="px-4 py-3 font-semibold">{formatCurrency(record.cost)}</td>
+                    <td className="px-4 py-3">
+                      {formatCurrency(record.creditBalanceAfter ?? record.credit_balance_after ?? 0)}
+                    </td>
                     <td className="max-w-[260px] truncate px-4 py-3">{record.notes || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
@@ -418,6 +495,39 @@ export default function HoursPage() {
           </div>
         </section>
       </div>
+      {isHoursModalOpen ? (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 px-4 py-5 xl:hidden">
+          <div className="mx-auto flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <h2 className="text-lg font-bold">{editingId ? "Editar horas" : "Registrar horas"}</h2>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setIsHoursModalOpen(false);
+                  resetFormState();
+                }}
+              >
+                Cerrar
+              </Button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {hoursForm}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {confirmationMessage ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-ocean" />
+            <p className="text-xl font-bold">{confirmationMessage}</p>
+            <Button type="button" className="mt-5 w-full justify-center" onClick={() => setConfirmationMessage("")}>
+              Aceptar
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </ProtectedPage>
   );
 }

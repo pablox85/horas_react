@@ -68,6 +68,9 @@ export default function CompanyDetailPage() {
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">RUT: {company.rut || "-"}</p>
             <p className="text-sm text-slate-500 dark:text-slate-400">{company.address || "Sin direccion"}</p>
             <p className="mt-3 font-semibold">Tarifa configurada: {formatCurrency(company.hourlyRate)}/hora</p>
+            <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+              Saldo a favor: {formatCurrency(Number(company.creditBalance ?? company.credit_balance) || 0)}
+            </p>
           </section>
 
           <section className="grid gap-4 md:grid-cols-3">

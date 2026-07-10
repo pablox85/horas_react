@@ -4,6 +4,7 @@ import { Timestamp } from "firebase/firestore";
 import type {
   Company,
   CurrentAccount,
+  CurrentAccountMovement,
   DistanceTrip,
   Employee,
   HourRecord,
@@ -17,14 +18,22 @@ import type {
 type DemoCollectionName =
   | "companies"
   | "currentAccounts"
+  | "current_account_movements"
   | "employees"
   | "hourRecords"
   | "distanceTrips";
 
-type DemoEntity = Company | CurrentAccount | Employee | HourRecord | DistanceTrip;
+type DemoEntity =
+  | Company
+  | CurrentAccount
+  | CurrentAccountMovement
+  | Employee
+  | HourRecord
+  | DistanceTrip;
 type DemoInput =
   | UpsertCompanyInput
   | UpsertCurrentAccountInput
+  | Omit<CurrentAccountMovement, "id">
   | UpsertEmployeeInput
   | UpsertHourRecordInput
   | UpsertDistanceTripInput;
@@ -33,6 +42,7 @@ interface DemoStore {
   tenantId: string;
   companies: Company[];
   currentAccounts: CurrentAccount[];
+  current_account_movements: CurrentAccountMovement[];
   employees: Employee[];
   hourRecords: HourRecord[];
   distanceTrips: DistanceTrip[];
@@ -91,8 +101,11 @@ function createDemoStore(tenantId: string): DemoStore {
     contactEmail: DEMO_EMAIL,
     hourlyRate: 625,
     pricePerKm: 100,
+    creditBalance: 0,
+    credit_balance: 0,
     createdAt: now,
     updatedAt: now,
+    updated_at: now,
   };
 
   return {
@@ -108,6 +121,7 @@ function createDemoStore(tenantId: string): DemoStore {
         updatedAt: now,
       },
     ],
+    current_account_movements: [],
     employees: [],
     hourRecords: [],
     distanceTrips: [],
@@ -264,6 +278,93 @@ export function applyDemoCurrentAccountToDistanceTrip(
     ...input,
     currentAccountDiscount: discount,
     pendingDebtAmount: safeCost - discount,
+  };
+}
+
+export function applyDemoCompanyCreditToTrip<
+  T extends { companyId?: string; cost: number },
+>(
+  tenantId: string,
+  collectionName: "hourRecords" | "distanceTrips",
+  input: T,
+): T & {
+  currentAccountDiscount: number;
+  creditBalanceAfter: number;
+  credit_balance_after: number;
+  pendingAmount: number;
+  pending_amount: number;
+  pendingDebtAmount?: number;
+} {
+  const safeCost = Math.max(0, Number(input.cost) || 0);
+
+  if (!input.companyId) {
+    return {
+      ...input,
+      currentAccountDiscount: 0,
+      creditBalanceAfter: 0,
+      credit_balance_after: 0,
+      pendingAmount: safeCost,
+      pending_amount: safeCost,
+      ...(collectionName === "distanceTrips" ? { pendingDebtAmount: safeCost } : {}),
+    };
+  }
+
+  const store = ensureDemoStore(tenantId);
+  const company = store.companies.find((item) => item.id === input.companyId);
+  const balanceBefore = Math.max(
+    0,
+    Number(company?.creditBalance ?? company?.credit_balance) || 0,
+  );
+  const discount = Math.min(balanceBefore, safeCost);
+  const balanceAfter = balanceBefore - discount;
+  const now = Timestamp.now();
+
+  store.companies = store.companies.map((item) =>
+    item.id === input.companyId
+      ? {
+          ...item,
+          creditBalance: balanceAfter,
+          credit_balance: balanceAfter,
+          updatedAt: now,
+          updated_at: now,
+        }
+      : item,
+  );
+
+  const movementId = createDemoId("current_account_movements");
+  const createdBy = "demo";
+  store.current_account_movements = [
+    ...store.current_account_movements,
+    {
+      id: movementId,
+      tenantId,
+      tenant_id: tenantId,
+      companyId: input.companyId,
+      company_id: input.companyId,
+      type: "trip_charge",
+      amount: discount,
+      balanceBefore,
+      balance_before: balanceBefore,
+      balanceAfter,
+      balance_after: balanceAfter,
+      tripId: null,
+      trip_id: null,
+      description: `Descuento automatico por viaje ${collectionName === "hourRecords" ? "por hora" : "por km"}.`,
+      createdAt: now,
+      created_at: now,
+      createdBy,
+      created_by: createdBy,
+    },
+  ];
+
+  return {
+    ...input,
+    currentAccountDiscount: discount,
+    creditBalanceAfter: balanceAfter,
+    credit_balance_after: balanceAfter,
+    pendingAmount: safeCost - discount,
+    pending_amount: safeCost - discount,
+    ...(collectionName === "distanceTrips" ? { pendingDebtAmount: safeCost - discount } : {}),
   };
 }
 
